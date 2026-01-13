@@ -1,0 +1,11 @@
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Configuration files (contains secrets)
+config.py
+
+# Virtual environments
+.venv
+env/
+venv/

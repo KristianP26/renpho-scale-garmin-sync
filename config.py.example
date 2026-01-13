@@ -1,0 +1,28 @@
+# ==========================================
+# ☁️ GARMIN CONNECT CONFIGURATION
+# ==========================================
+GARMIN_EMAIL = "your_garmin_connect_email"
+GARMIN_PASSWORD = "your_garmin_connect_password"
+
+# ==========================================
+# ⚙️ USER CONFIGURATION
+# ==========================================
+USER_HEIGHT = 183     # cm
+USER_AGE = 26         # years
+USER_GENDER = 'male'  # 'male' or 'female'
+
+# Set to True if you exercise regularly.
+USER_IS_ATHLETE = True
+
+# ==========================================
+# 🔧 TECHNICAL CONFIGURATION
+# ==========================================
+SCALE_MAC = "FF:03:00:13:A1:04"
+
+# Bluetooth UUIDs
+CHAR_NOTIFY = "0000fff1-0000-1000-8000-00805f9b34fb"
+CHAR_WRITE = "0000fff2-0000-1000-8000-00805f9b34fb"
+
+# Byte command to unlock the scale data stream
+# (Common for Renpho/Sencor/China generic scales)
+CMD_UNLOCK = bytearray([0x13, 0x09, 0x00, 0x01, 0x01, 0x02])
