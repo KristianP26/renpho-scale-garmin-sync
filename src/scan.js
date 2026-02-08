@@ -1,10 +1,3 @@
-/**
- * BLE scanner utility — discovers nearby Bluetooth LE devices.
- * Run with: npm run scan
- *
- * Useful for finding your Renpho scale's MAC address.
- */
-
 import noble from '@abandonware/noble';
 
 const SCAN_DURATION_MS = 15_000;

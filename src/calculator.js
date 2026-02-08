@@ -1,19 +1,4 @@
-/**
- * RenphoCalculator — Body composition calculator.
- *
- * Ported 1:1 from scale_sync.py. All formulas, constants, and clamp
- * ranges are identical to the Python implementation.
- */
-
 export class RenphoCalculator {
-  /**
-   * @param {number} weight     - Weight in kg
-   * @param {number} impedance  - BIA impedance in Ohm
-   * @param {number} height     - Height in cm
-   * @param {number} age        - Age in years
-   * @param {string} gender     - 'male' or 'female'
-   * @param {boolean} isAthlete - Athlete mode flag
-   */
   constructor(weight, impedance, height, age, gender, isAthlete = false) {
     this.weight = weight;
     this.impedance = impedance;
@@ -28,7 +13,6 @@ export class RenphoCalculator {
       return null;
     }
 
-    // --- 1. LBM (Lean Body Mass) ---
     let c1, c2, c3, c4;
 
     if (this.gender === 'male') {
@@ -50,7 +34,6 @@ export class RenphoCalculator {
 
     if (lbm > this.weight) lbm = this.weight * 0.96;
 
-    // --- 2. Core metrics ---
     const bodyFatKg = this.weight - lbm;
     const bodyFatPercent = Math.max(3.0, Math.min((bodyFatKg / this.weight) * 100, 60.0));
 
@@ -59,11 +42,9 @@ export class RenphoCalculator {
 
     const boneMass = lbm * 0.042;
 
-    // --- 3. Skeletal Muscle Mass ---
     const smmFactor = this.isAthlete ? 0.60 : 0.54;
     const muscleMass = lbm * smmFactor;
 
-    // --- 4. Visceral Fat Rating (1-59) ---
     let visceralRating;
     if (bodyFatPercent > 10) {
       visceralRating = (bodyFatPercent * 0.55) - 4 + (this.age * 0.08);
@@ -72,7 +53,6 @@ export class RenphoCalculator {
     }
     visceralRating = Math.max(1, Math.min(Math.trunc(visceralRating), 59));
 
-    // --- 5. Physique Rating (1-9) ---
     let physiqueRating = 5;
 
     if (bodyFatPercent > 25) {
@@ -95,7 +75,6 @@ export class RenphoCalculator {
       }
     }
 
-    // --- 6. BMI & BMR (Mifflin-St Jeor) ---
     const heightM = this.height / 100.0;
     const bmi = this.weight / (heightM * heightM);
 
@@ -104,7 +83,6 @@ export class RenphoCalculator {
     let bmr = baseBmr + offset;
     if (this.isAthlete) bmr *= 1.05;
 
-    // --- 7. Metabolic Age ---
     const idealBmr = (10 * this.weight) + (6.25 * this.height) - (5 * 25) + 5;
     let metabolicAge = this.age + Math.trunc((idealBmr - bmr) / 15);
     if (metabolicAge < 12) metabolicAge = 12;

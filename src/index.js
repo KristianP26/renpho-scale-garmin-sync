@@ -1,13 +1,5 @@
 #!/usr/bin/env node
 
-/**
- * Renpho Scale → Garmin Connect sync.
- *
- * 1. Connects to the scale via BLE (noble)
- * 2. Calculates body composition metrics
- * 3. Passes JSON to Python uploader via stdin
- */
-
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { spawn } from 'node:child_process';
@@ -16,12 +8,9 @@ import { config } from 'dotenv';
 import { connectAndRead } from './ble.js';
 import { RenphoCalculator } from './calculator.js';
 
-// Load .env from project root
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, '..');
 config({ path: join(ROOT, '.env') });
-
-// ---------- Configuration ----------
 
 function requireEnv(key) {
   const val = process.env[key];
@@ -44,13 +33,10 @@ const USER_AGE        = Number(requireEnv('USER_AGE'));
 const USER_GENDER     = requireEnv('USER_GENDER').toLowerCase();
 const USER_IS_ATHLETE = requireEnv('USER_IS_ATHLETE').toLowerCase() === 'true';
 
-// ---------- Main ----------
-
 async function main() {
   console.log(`\n[Sync] Renpho Scale → Garmin Connect`);
   console.log(`[Sync] Target: ${SCALE_MAC}\n`);
 
-  // 1. BLE — connect and read measurement
   const { weight, impedance } = await connectAndRead({
     scaleMac: SCALE_MAC,
     charNotify: CHAR_NOTIFY,
@@ -64,7 +50,6 @@ async function main() {
 
   console.log(`\n\n[Sync] Measurement received: ${weight} kg / ${impedance} Ohm`);
 
-  // 2. Calculate body composition
   const calc = new RenphoCalculator(
     weight, impedance, USER_HEIGHT, USER_AGE, USER_GENDER, USER_IS_ATHLETE,
   );
@@ -80,7 +65,6 @@ async function main() {
     console.log(`  ${k}: ${v}`);
   }
 
-  // 3. Build payload for Python uploader
   const payload = {
     weight,
     impedance,
@@ -90,8 +74,6 @@ async function main() {
   console.log('\n[Sync] Sending to Garmin uploader...');
   await uploadToGarmin(payload);
 }
-
-// ---------- Python bridge ----------
 
 function uploadToGarmin(payload) {
   return new Promise((resolve, reject) => {
@@ -118,8 +100,6 @@ function uploadToGarmin(payload) {
     });
   });
 }
-
-// ---------- Run ----------
 
 main().catch((err) => {
   console.error(`\n[Error] ${err.message}`);

@@ -1,23 +1,5 @@
-/**
- * BLE communication module for Renpho-compatible smart scales.
- * Uses @abandonware/noble which supports Linux, macOS, and Windows.
- */
-
 import noble from '@abandonware/noble';
 
-/**
- * Connect to a Renpho scale, unlock its data stream, and resolve
- * once a valid measurement (weight > 10 kg, impedance > 200 Ohm)
- * is received.
- *
- * @param {object} opts
- * @param {string} opts.scaleMac      - Target MAC address (e.g. "FF:03:00:13:A1:04")
- * @param {string} opts.charNotify    - Notify characteristic UUID
- * @param {string} opts.charWrite     - Write characteristic UUID
- * @param {number[]} opts.cmdUnlock   - Unlock command bytes
- * @param {function} [opts.onLiveData] - Optional callback for live readings
- * @returns {Promise<{weight: number, impedance: number}>}
- */
 export function connectAndRead(opts) {
   const {
     scaleMac,
@@ -96,7 +78,6 @@ export function connectAndRead(opts) {
             return;
           }
 
-          // Subscribe to notifications
           notifyChar.subscribe((err) => {
             if (err) {
               cleanup(peripheral);
@@ -124,7 +105,6 @@ export function connectAndRead(opts) {
             }
           });
 
-          // Periodically send unlock command
           const unlockBuf = Buffer.from(cmdUnlock);
           const sendUnlock = () => {
             if (writeChar && !resolved) {
@@ -149,7 +129,6 @@ export function connectAndRead(opts) {
       });
     });
 
-    // If the adapter is already powered on
     if (noble.state === 'poweredOn') {
       console.log('[BLE] Adapter already on, scanning...');
       noble.startScanning([], false);

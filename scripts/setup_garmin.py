@@ -1,15 +1,3 @@
-"""
-Garmin Connect authentication setup.
-
-Run once to authenticate with Garmin and store tokens locally.
-Subsequent runs of the sync tool will use these stored tokens.
-
-Usage:
-    npm run setup-garmin
-    # or directly:
-    python scripts/setup_garmin.py
-"""
-
 import os
 import sys
 from pathlib import Path
@@ -17,7 +5,6 @@ from pathlib import Path
 from dotenv import load_dotenv
 from garminconnect import Garmin
 
-# Load .env from project root
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(PROJECT_ROOT / ".env")
 

@@ -1,13 +1,3 @@
-"""
-Garmin Connect uploader.
-
-Reads a JSON payload from stdin and uploads body composition data
-to Garmin Connect using stored authentication tokens.
-
-Usage (called automatically by Node.js):
-    echo '{"weight": 80.5, ...}' | python scripts/garmin_upload.py
-"""
-
 import json
 import os
 import sys
@@ -16,7 +6,6 @@ from pathlib import Path
 from dotenv import load_dotenv
 from garminconnect import Garmin
 
-# Load .env from project root
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(PROJECT_ROOT / ".env")
 
@@ -28,7 +17,6 @@ FAKE_USER_AGENT = (
 
 
 def get_token_dir():
-    """Resolve token storage directory from env or default."""
     custom = os.environ.get("TOKEN_DIR", "").strip()
     if custom:
         return str(Path(custom).expanduser())
