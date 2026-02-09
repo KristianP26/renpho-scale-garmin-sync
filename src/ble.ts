@@ -11,7 +11,10 @@ const LBS_TO_KG = 0.453592;
 const BLE_DEBUG = !!process.env.DEBUG;
 const BT_BASE_UUID_SUFFIX = '00001000800000805f9b34fb';
 const CONNECT_TIMEOUT_MS = 15_000;
-const MAX_CONNECT_RETRIES = 3;
+const MAX_CONNECT_RETRIES = 5;
+/** Delay after stopScanning before calling connect — on Linux HCI the adapter
+ *  needs time to transition from scanning mode to connection mode. */
+const SCAN_SETTLE_MS = 500;
 
 function debug(msg: string): void {
   if (BLE_DEBUG) console.log(`[BLE:debug] ${msg}`);
@@ -84,7 +87,7 @@ export function scanAndRead(opts: ScanOptions): Promise<GarminPayload> {
       connecting = false;
       connectGen++; // invalidate any pending callbacks from old attempts
 
-      if (peripheral) {
+      if (peripheral && peripheral.state === 'connected') {
         try {
           peripheral.disconnect(() => {});
         } catch {
@@ -324,7 +327,15 @@ export function scanAndRead(opts: ScanOptions): Promise<GarminPayload> {
       );
       noble.stopScanning();
 
-      connectToPeripheral(peripheral, matchedAdapter);
+      // On Linux HCI, the adapter needs time to transition out of scanning mode
+      // before it can initiate a connection. Without this delay peripheral.connect()
+      // may silently hang (same transition bleak/BlueZ handles internally).
+      const adapterForConnect = matchedAdapter;
+      setTimeout(() => {
+        if (!resolved && !connecting) {
+          connectToPeripheral(peripheral, adapterForConnect);
+        }
+      }, SCAN_SETTLE_MS);
     }
 
     noble.on('discover', onDiscover);
