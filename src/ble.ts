@@ -21,18 +21,20 @@ export function scanAndRead(opts: ScanOptions): Promise<GarminPayload> {
     let unlockInterval: ReturnType<typeof setInterval> | null = null;
     let resolved = false;
 
-    function cleanup(peripheral: Peripheral): void {
+    function cleanup(peripheral?: Peripheral): void {
       if (unlockInterval) {
         clearInterval(unlockInterval);
         unlockInterval = null;
       }
       noble.stopScanning();
+      noble.removeListener('stateChange', onStateChange);
+      noble.removeListener('discover', onDiscover);
       if (peripheral && peripheral.state === 'connected') {
         peripheral.disconnect(() => {});
       }
     }
 
-    noble.on('stateChange', (state: string) => {
+    function onStateChange(state: string): void {
       if (state === 'poweredOn') {
         console.log('[BLE] Adapter powered on, scanning...');
         noble.startScanning([], false);
@@ -40,9 +42,11 @@ export function scanAndRead(opts: ScanOptions): Promise<GarminPayload> {
         console.log(`[BLE] Adapter state: ${state}`);
         noble.stopScanning();
       }
-    });
+    }
 
-    noble.on('discover', (peripheral: Peripheral) => {
+    noble.on('stateChange', onStateChange);
+
+    function onDiscover(peripheral: Peripheral): void {
       const id: string =
         peripheral.id?.replace(/:/g, '').toLowerCase() ||
         peripheral.address?.replace(/:/g, '').toLowerCase() ||
@@ -57,6 +61,7 @@ export function scanAndRead(opts: ScanOptions): Promise<GarminPayload> {
         matchedAdapter = adapters.find((a) => a.matches(peripheral));
         if (!matchedAdapter) {
           const deviceName: string = peripheral.advertisement.localName || '(unknown)';
+          cleanup();
           reject(
             new Error(
               `Device found (${deviceName}) but no adapter recognized it. ` +
@@ -80,6 +85,7 @@ export function scanAndRead(opts: ScanOptions): Promise<GarminPayload> {
 
       peripheral.connect((err?: string) => {
         if (err) {
+          cleanup(peripheral);
           reject(new Error(`BLE connect failed: ${err}`));
           return;
         }
@@ -166,7 +172,9 @@ export function scanAndRead(opts: ScanOptions): Promise<GarminPayload> {
           reject(new Error('Scale disconnected unexpectedly'));
         }
       });
-    });
+    }
+
+    noble.on('discover', onDiscover);
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     if ((noble as any).state === 'poweredOn') {
