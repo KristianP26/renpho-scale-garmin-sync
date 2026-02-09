@@ -57,6 +57,10 @@ Works on **Linux** (including Raspberry Pi), **macOS**, and **Windows**.
 sudo apt-get update
 sudo apt-get install -y bluetooth bluez libbluetooth-dev libudev-dev build-essential python3-pip
 
+# Install Node.js v20 (skip if already installed — check with: node --version)
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+sudo apt-get install -y nodejs
+
 # Allow Node.js to access BLE without root
 sudo setcap cap_net_raw+eip $(eval readlink -f $(which node))
 ```
@@ -66,15 +70,19 @@ sudo setcap cap_net_raw+eip $(eval readlink -f $(which node))
 ```bash
 # Install Xcode command-line tools (required for native modules)
 xcode-select --install
+
+# Install Node.js via Homebrew (skip if already installed — check with: node --version)
+brew install node@20
 ```
 
 No additional Bluetooth setup needed — macOS uses its native CoreBluetooth API.
 
 ### Windows
 
-1. Install [Visual Studio Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) (select "Desktop development with C++").
-2. Install [Python](https://python.org/) and check "Add to PATH" during installation.
-3. You need a BLE-compatible Bluetooth adapter. Most built-in adapters work, but you may need a [WinUSB driver setup with Zadig](https://zadig.akeo.ie/) for generic dongles.
+1. Install [Node.js](https://nodejs.org/) v20 or later — download the LTS installer and check "Add to PATH" during installation.
+2. Install [Visual Studio Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) (select "Desktop development with C++").
+3. Install [Python](https://python.org/) and check "Add to PATH" during installation.
+4. You need a BLE-compatible Bluetooth adapter. Most built-in adapters work, but you may need a [WinUSB driver setup with Zadig](https://zadig.akeo.ie/) for generic dongles.
 
 > **Note:** On Windows, `@abandonware/noble` requires the Bluetooth adapter to use WinUSB. See the [noble Windows setup guide](https://github.com/abandonware/noble#windows) for details.
 
