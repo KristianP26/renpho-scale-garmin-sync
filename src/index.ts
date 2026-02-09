@@ -28,7 +28,7 @@ function requireEnv(key: string): string {
   return val;
 }
 
-const SCALE_MAC: string = requireEnv('SCALE_MAC');
+const SCALE_MAC: string | undefined = process.env.SCALE_MAC || undefined;
 
 const profile: UserProfile = {
   height: Number(requireEnv('USER_HEIGHT')),
@@ -39,7 +39,11 @@ const profile: UserProfile = {
 
 async function main(): Promise<void> {
   console.log(`\n[Sync] Renpho Scale → Garmin Connect`);
-  console.log(`[Sync] Target: ${SCALE_MAC}`);
+  if (SCALE_MAC) {
+    console.log(`[Sync] Scanning for scale ${SCALE_MAC}...`);
+  } else {
+    console.log(`[Sync] Scanning for any recognized scale...`);
+  }
   console.log(`[Sync] Adapters: ${adapters.map((a) => a.name).join(', ')}\n`);
 
   const payload: GarminPayload = await scanAndRead({

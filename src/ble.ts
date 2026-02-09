@@ -7,7 +7,7 @@ import type {
 } from './interfaces/scale-adapter.js';
 
 export interface ScanOptions {
-  targetMac: string;
+  targetMac?: string;
   adapters: ScaleAdapter[];
   profile: UserProfile;
   onLiveData?: (reading: ScaleReading) => void;
@@ -15,7 +15,7 @@ export interface ScanOptions {
 
 export function scanAndRead(opts: ScanOptions): Promise<GarminPayload> {
   const { targetMac, adapters, profile, onLiveData } = opts;
-  const targetId: string = targetMac.toLowerCase().replace(/:/g, '');
+  const targetId: string | undefined = targetMac?.toLowerCase().replace(/:/g, '');
 
   return new Promise<GarminPayload>((resolve, reject) => {
     let unlockInterval: ReturnType<typeof setInterval> | null = null;
@@ -48,16 +48,27 @@ export function scanAndRead(opts: ScanOptions): Promise<GarminPayload> {
         || peripheral.address?.replace(/:/g, '').toLowerCase()
         || '';
 
-      if (id !== targetId) return;
+      let matchedAdapter: ScaleAdapter | undefined;
 
-      const matchedAdapter: ScaleAdapter | undefined = adapters.find((a) => a.matches(peripheral));
-      if (!matchedAdapter) {
-        const deviceName: string = peripheral.advertisement.localName || '(unknown)';
-        reject(new Error(
-          `Device found (${deviceName}) but no adapter recognized it. `
-          + `Registered adapters: ${adapters.map((a) => a.name).join(', ')}`,
-        ));
-        return;
+      if (targetId) {
+        // Pinned mode: only consider the specific MAC
+        if (id !== targetId) return;
+
+        matchedAdapter = adapters.find((a) => a.matches(peripheral));
+        if (!matchedAdapter) {
+          const deviceName: string = peripheral.advertisement.localName || '(unknown)';
+          reject(new Error(
+            `Device found (${deviceName}) but no adapter recognized it. `
+            + `Registered adapters: ${adapters.map((a) => a.name).join(', ')}`,
+          ));
+          return;
+        }
+      } else {
+        // Auto-discovery mode: try all adapters against every peripheral
+        matchedAdapter = adapters.find((a) => a.matches(peripheral));
+        if (!matchedAdapter) return;
+
+        console.log(`[BLE] Auto-discovered: ${matchedAdapter.name} (${peripheral.id})`);
       }
 
       console.log(`[BLE] Found scale: ${peripheral.advertisement.localName || peripheral.id} [${matchedAdapter.name}]`);

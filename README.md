@@ -110,13 +110,17 @@ USER_HEIGHT=183
 USER_AGE=26
 USER_GENDER=male
 USER_IS_ATHLETE=true
+```
 
+`SCALE_MAC` is **optional**. If omitted, the app auto-discovers any recognized scale during `npm start`. To pin to a specific device, add:
+
+```ini
 SCALE_MAC=FF:03:00:13:A1:04
 ```
 
-### 2. Find your scale's MAC address
+### 2. Find your scale's MAC address (optional)
 
-Turn on your Renpho scale (step on it briefly) and run:
+By default, the app auto-discovers your scale — no MAC address needed. If you have multiple BLE scales nearby and want to pin to a specific one, run:
 
 ```bash
 npm run scan
@@ -144,7 +148,7 @@ This logs into Garmin using the credentials in your `.env` and stores authentica
 npm start
 ```
 
-1. The app will start scanning for your scale via Bluetooth.
+1. The app scans for your scale via Bluetooth. If `SCALE_MAC` is set, it connects to that specific device; otherwise it auto-discovers any recognized scale.
 2. **Step on the scale** and wait for the measurement to stabilize.
 3. Once weight and impedance data are received, body composition is calculated and uploaded to Garmin Connect.
 
@@ -264,7 +268,8 @@ sudo setcap cap_net_raw+eip $(eval readlink -f $(which node))
 
 ### Scale not found
 - Make sure the scale is powered on (step on it to wake it up).
-- Verify the MAC address matches (`npm run scan`).
+- If using a specific `SCALE_MAC`, verify the address matches (`npm run scan`).
+- If using auto-discovery, ensure only one recognized scale is powered on nearby.
 - On Linux, ensure the Bluetooth service is running: `sudo systemctl start bluetooth`.
 
 ### Garmin upload fails
