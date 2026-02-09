@@ -185,6 +185,14 @@ When impedance is not available, body fat is estimated using the Deurenberg form
 
 Scales that provide their own body composition values (fat, water, muscle, bone) use those directly — only BMI, BMR, metabolic age, visceral fat, and physique rating are always calculated from the formulas above.
 
+## Testing
+
+```bash
+npm test
+```
+
+Unit tests use [Vitest](https://vitest.dev/) and cover the core body composition math in `calculator.ts` and `body-comp-helpers.ts`.
+
 ## Project Structure
 
 ```
@@ -221,6 +229,9 @@ renpho-scale-garmin-sync/
 │       ├── mgb.ts                  # MGB (Swan / Icomon / YG)
 │       ├── hoffen.ts               # Hoffen BS-8107
 │       └── standard-gatt.ts        # Generic BCS/WSS catch-all
+├── tests/
+│   ├── calculator.test.ts            # RenphoCalculator unit tests
+│   └── body-comp-helpers.test.ts     # Body-comp helper unit tests
 ├── scripts/
 │   ├── garmin_upload.py            # Garmin uploader (JSON stdin → JSON stdout)
 │   └── setup_garmin.py             # One-time Garmin auth setup
