@@ -8,7 +8,8 @@ Works on **Linux** (including Raspberry Pi), **macOS**, and **Windows**.
 
 | Brand / Model | Protocol |
 |---|---|
-| **Renpho** / QN-Scale / Sencor | Custom (FFF0) |
+| **QN-Scale** / Renpho / Senssun / Sencor | Custom (FFE0 / FFF0) |
+| **Renpho ES-WBE28** | Vendor BCS/WSS |
 | **Renpho ES-26BB** | Custom (1A10) |
 | **Xiaomi Mi Scale 2** (MIBCS / MIBFS) | Vendor UUID |
 | **Yunmai** Signal / Mini / SE | Custom (FFE0) |
@@ -121,7 +122,7 @@ Turn on your Renpho scale (step on it briefly) and run:
 npm run scan
 ```
 
-This scans for nearby BLE devices for 15 seconds. Recognized scales are tagged with the adapter name (e.g. `[Renpho]`, `[Xiaomi Mi Scale 2]`, `[Yunmai]`). Copy the MAC address into your `.env` file.
+This scans for nearby BLE devices for 15 seconds. Recognized scales are tagged with the adapter name (e.g. `[QN Scale]`, `[Xiaomi Mi Scale 2]`, `[Yunmai]`). Copy the MAC address into your `.env` file.
 
 > **Tip:** On macOS, noble uses UUIDs instead of MAC addresses. The scan output will show the correct identifier to use.
 
@@ -176,7 +177,8 @@ renpho-scale-garmin-sync/
 │   └── scales/
 │       ├── index.ts                # Adapter registry (all adapters)
 │       ├── body-comp-helpers.ts    # Shared body-comp utilities
-│       ├── renpho.ts               # Renpho / QN-Scale / Sencor
+│       ├── qn-scale.ts             # QN-Scale / Renpho / Senssun / Sencor
+│       ├── renpho.ts               # Renpho ES-WBE28
 │       ├── renpho-es26bb.ts        # Renpho ES-26BB-B
 │       ├── mi-scale-2.ts           # Xiaomi Mi Scale 2
 │       ├── yunmai.ts               # Yunmai Signal / Mini / SE
