@@ -10,6 +10,8 @@ import type { WeightUnit } from './validate-env.js';
 const LBS_TO_KG = 0.453592;
 const BLE_DEBUG = !!process.env.DEBUG;
 const BT_BASE_UUID_SUFFIX = '00001000800000805f9b34fb';
+const CONNECT_TIMEOUT_MS = 15_000;
+const MAX_CONNECT_RETRIES = 3;
 
 function debug(msg: string): void {
   if (BLE_DEBUG) console.log(`[BLE:debug] ${msg}`);
@@ -44,19 +46,62 @@ export function scanAndRead(opts: ScanOptions): Promise<GarminPayload> {
 
   return new Promise<GarminPayload>((resolve, reject) => {
     let unlockInterval: ReturnType<typeof setInterval> | null = null;
+    let connectTimer: ReturnType<typeof setTimeout> | null = null;
     let resolved = false;
+    let retryCount = 0;
+    let connecting = false;
 
-    function cleanup(peripheral?: Peripheral): void {
+    function clearTimers(): void {
       if (unlockInterval) {
         clearInterval(unlockInterval);
         unlockInterval = null;
       }
+      if (connectTimer) {
+        clearTimeout(connectTimer);
+        connectTimer = null;
+      }
+    }
+
+    function fullCleanup(peripheral?: Peripheral): void {
+      clearTimers();
+      connecting = false;
       noble.stopScanning();
       noble.removeListener('stateChange', onStateChange);
       noble.removeListener('discover', onDiscover);
       if (peripheral && peripheral.state === 'connected') {
         peripheral.disconnect(() => {});
       }
+    }
+
+    function retryOrFail(reason: string, peripheral?: Peripheral): void {
+      clearTimers();
+      connecting = false;
+
+      if (peripheral && peripheral.state === 'connected') {
+        try {
+          peripheral.disconnect(() => {});
+        } catch {
+          /* ignore */
+        }
+      }
+
+      retryCount++;
+      if (retryCount > MAX_CONNECT_RETRIES) {
+        fullCleanup(peripheral);
+        reject(new Error(`${reason} (failed after ${retryCount} attempts)`));
+        return;
+      }
+
+      console.log(`[BLE] ${reason}. Retrying (${retryCount}/${MAX_CONNECT_RETRIES})...`);
+
+      // Stop and restart scanning to allow re-discovery of the same peripheral
+      noble.stopScanning();
+      setTimeout(() => {
+        if (!resolved) {
+          debug('Restarting scan...');
+          noble.startScanning([], true);
+        }
+      }, 1000);
     }
 
     function onStateChange(state: string): void {
@@ -71,6 +116,141 @@ export function scanAndRead(opts: ScanOptions): Promise<GarminPayload> {
 
     noble.on('stateChange', onStateChange);
 
+    function connectToPeripheral(peripheral: Peripheral, adapter: ScaleAdapter): void {
+      if (resolved || connecting) return;
+      connecting = true;
+
+      // Register disconnect handler BEFORE calling connect so we catch early disconnects
+      const onDisconnect = (): void => {
+        peripheral.removeListener('disconnect', onDisconnect);
+        if (resolved) return;
+        retryOrFail('Scale disconnected', peripheral);
+      };
+      peripheral.on('disconnect', onDisconnect);
+
+      // Timeout in case peripheral.connect() callback never fires
+      connectTimer = setTimeout(() => {
+        if (resolved || !connecting) return;
+        peripheral.removeListener('disconnect', onDisconnect);
+        retryOrFail('Connection timed out', peripheral);
+      }, CONNECT_TIMEOUT_MS);
+
+      peripheral.connect((err?: string) => {
+        if (connectTimer) {
+          clearTimeout(connectTimer);
+          connectTimer = null;
+        }
+
+        if (err) {
+          peripheral.removeListener('disconnect', onDisconnect);
+          retryOrFail(`Connect error: ${err}`, peripheral);
+          return;
+        }
+
+        console.log('[BLE] Connected. Discovering services...');
+        setupCharacteristics(peripheral, adapter);
+      });
+    }
+
+    function setupCharacteristics(peripheral: Peripheral, adapter: ScaleAdapter): void {
+      peripheral.discoverAllServicesAndCharacteristics((err, services, characteristics) => {
+        if (err) {
+          retryOrFail(`Service discovery failed: ${err}`, peripheral);
+          return;
+        }
+
+        debug(`Services: [${(services || []).map((s) => s.uuid).join(', ')}]`);
+        for (const c of characteristics) {
+          debug(`  Char ${c.uuid} — properties: [${c.properties?.join(', ') ?? 'n/a'}]`);
+        }
+
+        debug(
+          `Looking for notify=${adapter.charNotifyUuid}` +
+            (adapter.altCharNotifyUuid ? ` (alt=${adapter.altCharNotifyUuid})` : '') +
+            `, write=${adapter.charWriteUuid}` +
+            (adapter.altCharWriteUuid ? ` (alt=${adapter.altCharWriteUuid})` : ''),
+        );
+
+        const findChar = (uuid: string): Characteristic | undefined =>
+          characteristics.find((c) => uuidMatch(c.uuid, uuid));
+
+        const notifyChar: Characteristic | undefined =
+          findChar(adapter.charNotifyUuid) ??
+          (adapter.altCharNotifyUuid ? findChar(adapter.altCharNotifyUuid) : undefined);
+        const writeChar: Characteristic | undefined =
+          findChar(adapter.charWriteUuid) ??
+          (adapter.altCharWriteUuid ? findChar(adapter.altCharWriteUuid) : undefined);
+
+        if (!notifyChar || !writeChar) {
+          const discoveredUuids = characteristics.map((c) => c.uuid).join(', ');
+          fullCleanup(peripheral);
+          reject(
+            new Error(
+              `Required characteristics not found. ` +
+                `Notify (${adapter.charNotifyUuid}): ${!!notifyChar}, ` +
+                `Write (${adapter.charWriteUuid}): ${!!writeChar}. ` +
+                `Discovered characteristics: [${discoveredUuids}]`,
+            ),
+          );
+          return;
+        }
+
+        debug(`Matched notify=${notifyChar.uuid}, write=${writeChar.uuid}`);
+
+        notifyChar.subscribe((err?: string) => {
+          if (err) {
+            fullCleanup(peripheral);
+            reject(new Error(`Subscribe failed: ${err}`));
+            return;
+          }
+          console.log('[BLE] Subscribed to notifications. Step on the scale.');
+        });
+
+        notifyChar.on('data', (data: Buffer) => {
+          if (resolved) return;
+
+          const reading: ScaleReading | null = adapter.parseNotification(data);
+          if (!reading) return;
+
+          // Convert lbs → kg when the user declared lbs and the adapter
+          // doesn't already normalise to kg internally.
+          if (weightUnit === 'lbs' && !adapter.normalizesWeight) {
+            reading.weight *= LBS_TO_KG;
+          }
+
+          if (onLiveData) {
+            onLiveData(reading);
+          }
+
+          if (adapter.isComplete(reading)) {
+            resolved = true;
+            fullCleanup(peripheral);
+
+            try {
+              const payload: GarminPayload = adapter.computeMetrics(reading, profile);
+              resolve(payload);
+            } catch (e) {
+              reject(e);
+            }
+          }
+        });
+
+        const unlockBuf: Buffer = Buffer.from(adapter.unlockCommand);
+        const sendUnlock = (): void => {
+          if (!resolved) {
+            writeChar.write(unlockBuf, true, (err?: string) => {
+              if (err && !resolved) {
+                console.error(`[BLE] Unlock write error: ${err}`);
+              }
+            });
+          }
+        };
+
+        sendUnlock();
+        unlockInterval = setInterval(sendUnlock, adapter.unlockIntervalMs);
+      });
+    }
+
     function onDiscover(peripheral: Peripheral): void {
       const id: string =
         peripheral.id?.replace(/:/g, '').toLowerCase() ||
@@ -82,6 +262,9 @@ export function scanAndRead(opts: ScanOptions): Promise<GarminPayload> {
         `Discovered: ${peripheral.advertisement.localName || '(unnamed)'} [${id}] services=[${advUuids.join(', ')}]`,
       );
 
+      // Skip if we're already in the middle of connecting
+      if (connecting) return;
+
       let matchedAdapter: ScaleAdapter | undefined;
 
       if (targetId) {
@@ -91,7 +274,7 @@ export function scanAndRead(opts: ScanOptions): Promise<GarminPayload> {
         matchedAdapter = adapters.find((a) => a.matches(peripheral));
         if (!matchedAdapter) {
           const deviceName: string = peripheral.advertisement.localName || '(unknown)';
-          cleanup();
+          fullCleanup();
           reject(
             new Error(
               `Device found (${deviceName}) but no adapter recognized it. ` +
@@ -113,126 +296,7 @@ export function scanAndRead(opts: ScanOptions): Promise<GarminPayload> {
       );
       noble.stopScanning();
 
-      peripheral.connect((err?: string) => {
-        if (err) {
-          cleanup(peripheral);
-          reject(new Error(`BLE connect failed: ${err}`));
-          return;
-        }
-
-        console.log('[BLE] Connected. Discovering services...');
-
-        peripheral.discoverAllServicesAndCharacteristics((err, services, characteristics) => {
-          if (err) {
-            cleanup(peripheral);
-            reject(new Error(`Service discovery failed: ${err}`));
-            return;
-          }
-
-          debug(`Services: [${(services || []).map((s) => s.uuid).join(', ')}]`);
-          for (const c of characteristics) {
-            debug(`  Char ${c.uuid} — properties: [${c.properties?.join(', ') ?? 'n/a'}]`);
-          }
-
-          debug(
-            `Looking for notify=${matchedAdapter.charNotifyUuid}` +
-              (matchedAdapter.altCharNotifyUuid
-                ? ` (alt=${matchedAdapter.altCharNotifyUuid})`
-                : '') +
-              `, write=${matchedAdapter.charWriteUuid}` +
-              (matchedAdapter.altCharWriteUuid ? ` (alt=${matchedAdapter.altCharWriteUuid})` : ''),
-          );
-
-          const findChar = (uuid: string): Characteristic | undefined =>
-            characteristics.find((c) => uuidMatch(c.uuid, uuid));
-
-          const notifyChar: Characteristic | undefined =
-            findChar(matchedAdapter.charNotifyUuid) ??
-            (matchedAdapter.altCharNotifyUuid
-              ? findChar(matchedAdapter.altCharNotifyUuid)
-              : undefined);
-          const writeChar: Characteristic | undefined =
-            findChar(matchedAdapter.charWriteUuid) ??
-            (matchedAdapter.altCharWriteUuid
-              ? findChar(matchedAdapter.altCharWriteUuid)
-              : undefined);
-
-          if (!notifyChar || !writeChar) {
-            const discoveredUuids = characteristics.map((c) => c.uuid).join(', ');
-            cleanup(peripheral);
-            reject(
-              new Error(
-                `Required characteristics not found. ` +
-                  `Notify (${matchedAdapter.charNotifyUuid}): ${!!notifyChar}, ` +
-                  `Write (${matchedAdapter.charWriteUuid}): ${!!writeChar}. ` +
-                  `Discovered characteristics: [${discoveredUuids}]`,
-              ),
-            );
-            return;
-          }
-
-          debug(`Matched notify=${notifyChar.uuid}, write=${writeChar.uuid}`);
-
-          notifyChar.subscribe((err?: string) => {
-            if (err) {
-              cleanup(peripheral);
-              reject(new Error(`Subscribe failed: ${err}`));
-              return;
-            }
-            console.log('[BLE] Subscribed to notifications. Step on the scale.');
-          });
-
-          notifyChar.on('data', (data: Buffer) => {
-            if (resolved) return;
-
-            const reading: ScaleReading | null = matchedAdapter.parseNotification(data);
-            if (!reading) return;
-
-            // Convert lbs → kg when the user declared lbs and the adapter
-            // doesn't already normalise to kg internally.
-            if (weightUnit === 'lbs' && !matchedAdapter.normalizesWeight) {
-              reading.weight *= LBS_TO_KG;
-            }
-
-            if (onLiveData) {
-              onLiveData(reading);
-            }
-
-            if (matchedAdapter.isComplete(reading)) {
-              resolved = true;
-              cleanup(peripheral);
-
-              try {
-                const payload: GarminPayload = matchedAdapter.computeMetrics(reading, profile);
-                resolve(payload);
-              } catch (e) {
-                reject(e);
-              }
-            }
-          });
-
-          const unlockBuf: Buffer = Buffer.from(matchedAdapter.unlockCommand);
-          const sendUnlock = (): void => {
-            if (!resolved) {
-              writeChar.write(unlockBuf, true, (err?: string) => {
-                if (err && !resolved) {
-                  console.error(`[BLE] Unlock write error: ${err}`);
-                }
-              });
-            }
-          };
-
-          sendUnlock();
-          unlockInterval = setInterval(sendUnlock, matchedAdapter.unlockIntervalMs);
-        });
-      });
-
-      peripheral.on('disconnect', () => {
-        if (!resolved) {
-          cleanup(peripheral);
-          reject(new Error('Scale disconnected unexpectedly'));
-        }
-      });
+      connectToPeripheral(peripheral, matchedAdapter);
     }
 
     noble.on('discover', onDiscover);
