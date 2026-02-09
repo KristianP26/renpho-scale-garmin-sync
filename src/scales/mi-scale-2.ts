@@ -5,6 +5,7 @@ import type {
   UserProfile,
   GarminPayload,
 } from '../interfaces/scale-adapter.js';
+import { buildPayload } from './body-comp-helpers.js';
 
 /** Mi vendor history/body-comp characteristic (custom base UUID). */
 const CHR_MI_HISTORY = '00002a2f0000351221180009af100700';
@@ -92,34 +93,15 @@ export class MiScale2Adapter implements ScaleAdapter {
       profile.height,
     );
 
-    const bodyFatPercent = mi.bodyFat(weight, impedance);
-    const waterPercent = mi.water(bodyFatPercent);
-    const boneMass = mi.boneMass(weight, impedance);
-    const musclePct = mi.muscle(weight, impedance);
-    const muscleMass = (musclePct / 100) * weight;
+    const fat = mi.bodyFat(weight, impedance);
+    const water = mi.water(fat);
+    const bone = mi.boneMass(weight, impedance);
+    const muscle = mi.muscle(weight, impedance);
     const visceralFat = mi.visceralFat(weight);
 
-    const heightM = profile.height / 100;
-    const bmi = weight / (heightM * heightM);
-
-    const physiqueRating = computePhysiqueRating(bodyFatPercent, muscleMass, weight);
-
-    const baseBmr = (10 * weight) + (6.25 * profile.height) - (5 * profile.age);
-    let bmr = baseBmr + (profile.gender === 'male' ? 5 : -161);
-    if (profile.isAthlete) bmr *= 1.05;
-
-    const idealBmr = (10 * weight) + (6.25 * profile.height) - (5 * 25) + 5;
-    let metabolicAge = profile.age + Math.trunc((idealBmr - bmr) / 15);
-    if (metabolicAge < 12) metabolicAge = 12;
-    if (profile.isAthlete && metabolicAge > profile.age) metabolicAge = profile.age - 5;
-
-    return {
-      weight: r2(weight), impedance: r2(impedance),
-      bmi: r2(bmi), bodyFatPercent: r2(bodyFatPercent),
-      waterPercent: r2(waterPercent), boneMass: r2(boneMass),
-      muscleMass: r2(muscleMass), visceralFat: r2(visceralFat),
-      physiqueRating, bmr: Math.trunc(bmr), metabolicAge,
-    };
+    return buildPayload(weight, impedance, {
+      fat, water, muscle, bone, visceralFat,
+    }, profile);
   }
 }
 
@@ -233,20 +215,3 @@ class MiScaleCalc {
   }
 }
 
-// ─── Shared helpers ─────────────────────────────────────────────────────────
-
-function computePhysiqueRating(bodyFatPercent: number, muscleMass: number, weight: number): number {
-  if (bodyFatPercent > 25) return muscleMass > weight * 0.4 ? 2 : 1;
-  if (bodyFatPercent < 18) {
-    if (muscleMass > weight * 0.45) return 9;
-    if (muscleMass > weight * 0.4) return 8;
-    return 7;
-  }
-  if (muscleMass > weight * 0.45) return 6;
-  if (muscleMass < weight * 0.38) return 4;
-  return 5;
-}
-
-function r2(v: number): number {
-  return Math.round(v * 100) / 100;
-}

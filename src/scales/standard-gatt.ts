@@ -1,5 +1,6 @@
 import type { Peripheral } from '@abandonware/noble';
 import { RenphoCalculator } from '../calculator.js';
+import { buildPayload } from './body-comp-helpers.js';
 import type {
   ScaleAdapter,
   ScaleReading,
@@ -171,7 +172,7 @@ export class StandardGattScaleAdapter implements ScaleAdapter {
   }
 
   computeMetrics(reading: ScaleReading, profile: UserProfile): GarminPayload {
-    // When impedance is available, use the full RenphoCalculator
+    // When impedance is available, use the full RenphoCalculator (BIA-based)
     if (reading.impedance > 0) {
       const calc = new RenphoCalculator(
         reading.weight, reading.impedance,
@@ -182,92 +183,15 @@ export class StandardGattScaleAdapter implements ScaleAdapter {
     }
 
     // Fallback: derive metrics from GATT body-fat + profile estimations
-    return buildPayloadFromBodyFat(
-      reading.weight, reading.impedance,
-      this.cachedGatt?.bodyFatPercent ?? 0,
-      this.cachedGatt?.musclePct,
-      this.cachedGatt?.waterMassKg,
-      profile,
-    );
+    const gatt = this.cachedGatt;
+    const waterPercent = gatt?.waterMassKg && reading.weight > 0
+      ? (gatt.waterMassKg / reading.weight) * 100
+      : undefined;
+
+    return buildPayload(reading.weight, reading.impedance, {
+      fat: gatt?.bodyFatPercent && gatt.bodyFatPercent > 0 ? gatt.bodyFatPercent : undefined,
+      water: waterPercent,
+      muscle: gatt?.musclePct,
+    }, profile);
   }
-}
-
-// ─── Helpers ────────────────────────────────────────────────────────────────
-
-function buildPayloadFromBodyFat(
-  weight: number, impedance: number,
-  bodyFatPct: number,
-  musclePctGatt: number | undefined,
-  waterMassKg: number | undefined,
-  p: UserProfile,
-): GarminPayload {
-  const heightM = p.height / 100;
-  const bmi = weight / (heightM * heightM);
-
-  const bodyFatPercent = bodyFatPct > 0
-    ? bodyFatPct
-    : estimateBodyFat(bmi, p);
-
-  const lbm = weight * (1 - bodyFatPercent / 100);
-
-  const waterPercent = waterMassKg && weight > 0
-    ? (waterMassKg / weight) * 100
-    : (lbm * (p.isAthlete ? 0.74 : 0.73) / weight) * 100;
-
-  const boneMass = lbm * 0.042;
-
-  const muscleMass = musclePctGatt != null
-    ? weight * musclePctGatt / 100
-    : lbm * (p.isAthlete ? 0.60 : 0.54);
-
-  let visceralFat: number;
-  if (bodyFatPercent > 10) {
-    visceralFat = (bodyFatPercent * 0.55) - 4 + (p.age * 0.08);
-  } else {
-    visceralFat = 1;
-  }
-  visceralFat = Math.max(1, Math.min(Math.trunc(visceralFat), 59));
-
-  const physiqueRating = computePhysiqueRating(bodyFatPercent, muscleMass, weight);
-
-  const baseBmr = (10 * weight) + (6.25 * p.height) - (5 * p.age);
-  let bmr = baseBmr + (p.gender === 'male' ? 5 : -161);
-  if (p.isAthlete) bmr *= 1.05;
-
-  const idealBmr = (10 * weight) + (6.25 * p.height) - (5 * 25) + 5;
-  let metabolicAge = p.age + Math.trunc((idealBmr - bmr) / 15);
-  if (metabolicAge < 12) metabolicAge = 12;
-  if (p.isAthlete && metabolicAge > p.age) metabolicAge = p.age - 5;
-
-  return {
-    weight: r2(weight), impedance: r2(impedance),
-    bmi: r2(bmi), bodyFatPercent: r2(bodyFatPercent),
-    waterPercent: r2(waterPercent), boneMass: r2(boneMass),
-    muscleMass: r2(muscleMass), visceralFat,
-    physiqueRating, bmr: Math.trunc(bmr), metabolicAge,
-  };
-}
-
-/** Deurenberg formula — fallback when no scale body-fat is available. */
-function estimateBodyFat(bmi: number, p: UserProfile): number {
-  const sexFactor = p.gender === 'male' ? 1 : 0;
-  let bf = 1.2 * bmi + 0.23 * p.age - 10.8 * sexFactor - 5.4;
-  if (p.isAthlete) bf *= 0.85;
-  return Math.max(3, Math.min(bf, 60));
-}
-
-function computePhysiqueRating(bodyFatPercent: number, muscleMass: number, weight: number): number {
-  if (bodyFatPercent > 25) return muscleMass > weight * 0.4 ? 2 : 1;
-  if (bodyFatPercent < 18) {
-    if (muscleMass > weight * 0.45) return 9;
-    if (muscleMass > weight * 0.4) return 8;
-    return 7;
-  }
-  if (muscleMass > weight * 0.45) return 6;
-  if (muscleMass < weight * 0.38) return 4;
-  return 5;
-}
-
-function r2(v: number): number {
-  return Math.round(v * 100) / 100;
 }

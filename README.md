@@ -150,18 +150,34 @@ npm start
 
 ### What gets uploaded
 
-| Metric | Unit | Description |
+| Metric | Unit | Formula |
 |---|---|---|
 | Weight | kg | Raw scale reading |
-| Body Fat | % | Bioelectrical impedance analysis |
-| Water | % | Hydration level |
-| Bone Mass | kg | Estimated bone mineral content |
-| Muscle Mass | kg | Skeletal muscle mass |
-| BMI | - | Body Mass Index |
-| BMR | kcal | Basal Metabolic Rate (Mifflin-St Jeor) |
-| Visceral Fat | 1-59 | Visceral fat rating |
-| Physique Rating | 1-9 | Body type classification |
-| Metabolic Age | years | Estimated metabolic age |
+| BMI | - | `weight / (height_m)^2` |
+| Body Fat | % | BIA: `LBM = c1*(H^2/Z) + c2*W + c3*A + c4`, `BF% = (W - LBM) / W * 100` |
+| Water | % | `LBM * 0.73 / W * 100` (athlete: 0.74) |
+| Bone Mass | kg | `LBM * 0.042` |
+| Muscle Mass | kg | `LBM * 0.54` (athlete: 0.60) |
+| Visceral Fat | 1-59 | `BF% * 0.55 - 4 + age * 0.08` |
+| Physique Rating | 1-9 | Based on BF% and muscle/weight ratio |
+| BMR | kcal | Mifflin-St Jeor: `10*W + 6.25*H - 5*A + s` (athlete: +5%) |
+| Metabolic Age | years | `age + (idealBMR - BMR) / 15` |
+
+Where `W` = weight (kg), `H` = height (cm), `A` = age, `Z` = impedance (ohm), `s` = +5 male / -161 female.
+
+BIA coefficients (c1, c2, c3, c4):
+
+| | c1 | c2 | c3 | c4 |
+|---|---|---|---|---|
+| Male | 0.503 | 0.165 | -0.158 | 17.8 |
+| Male (athlete) | 0.637 | 0.205 | -0.180 | 12.5 |
+| Female | 0.490 | 0.150 | -0.130 | 11.5 |
+| Female (athlete) | 0.550 | 0.180 | -0.150 | 8.5 |
+
+When impedance is not available, body fat is estimated using the Deurenberg formula:
+`BF% = 1.2 * BMI + 0.23 * age - 10.8 * sex - 5.4` (sex: 1 = male, 0 = female; athlete: *0.85).
+
+Scales that provide their own body composition values (fat, water, muscle, bone) use those directly — only BMI, BMR, metabolic age, visceral fat, and physique rating are always calculated from the formulas above.
 
 ## Project Structure
 

@@ -5,6 +5,7 @@ import type {
   UserProfile,
   GarminPayload,
 } from '../interfaces/scale-adapter.js';
+import { buildPayload, estimateBodyFat } from './body-comp-helpers.js';
 
 /** Expand a 16-bit UUID to the full 128-bit BLE string (no dashes, lowercase). */
 function uuid16(code: number): string {
@@ -109,41 +110,23 @@ export class YunmaiScaleAdapter implements ScaleAdapter {
     const heightM = profile.height / 100;
     const bmi = weight / (heightM * heightM);
 
-    let bodyFatPercent: number;
+    let fat: number;
     if (this.embeddedFatPercent != null && this.embeddedFatPercent > 0) {
-      bodyFatPercent = this.embeddedFatPercent;
+      fat = this.embeddedFatPercent;
     } else if (impedance > 0) {
-      bodyFatPercent = ym.fat(profile.age, weight, impedance);
+      fat = ym.fat(profile.age, weight, impedance);
     } else {
-      // Weight-only Yunmai Signal — estimate from BMI
-      bodyFatPercent = estimateBodyFat(bmi, profile);
+      fat = estimateBodyFat(bmi, profile);
     }
 
-    const musclePct = ym.muscle(bodyFatPercent);
-    const muscleMass = (musclePct / 100) * weight;
-    const waterPercent = ym.water(bodyFatPercent);
-    const boneMass = ym.boneMass(musclePct, weight);
-    const leanBodyMass = ym.leanBodyMass(weight, bodyFatPercent);
-    const visceralFat = ym.visceralFat(bodyFatPercent, profile.age);
+    const musclePct = ym.muscle(fat);
+    const water = ym.water(fat);
+    const bone = ym.boneMass(musclePct, weight);
+    const visceralFat = ym.visceralFat(fat, profile.age);
 
-    const physiqueRating = computePhysiqueRating(bodyFatPercent, muscleMass, weight);
-
-    const baseBmr = (10 * weight) + (6.25 * profile.height) - (5 * profile.age);
-    let bmr = baseBmr + (profile.gender === 'male' ? 5 : -161);
-    if (profile.isAthlete) bmr *= 1.05;
-
-    const idealBmr = (10 * weight) + (6.25 * profile.height) - (5 * 25) + 5;
-    let metabolicAge = profile.age + Math.trunc((idealBmr - bmr) / 15);
-    if (metabolicAge < 12) metabolicAge = 12;
-    if (profile.isAthlete && metabolicAge > profile.age) metabolicAge = profile.age - 5;
-
-    return {
-      weight: r2(weight), impedance: r2(impedance),
-      bmi: r2(bmi), bodyFatPercent: r2(bodyFatPercent),
-      waterPercent: r2(waterPercent), boneMass: r2(boneMass),
-      muscleMass: r2(muscleMass), visceralFat: r2(visceralFat),
-      physiqueRating, bmr: Math.trunc(bmr), metabolicAge,
-    };
+    return buildPayload(weight, impedance, {
+      fat, water, muscle: musclePct, bone, visceralFat,
+    }, profile);
   }
 }
 
@@ -242,28 +225,3 @@ class YunmaiCalc {
   }
 }
 
-// ─── Shared helpers ─────────────────────────────────────────────────────────
-
-/** Deurenberg formula — fallback when no impedance is available. */
-function estimateBodyFat(bmi: number, p: UserProfile): number {
-  const sexFactor = p.gender === 'male' ? 1 : 0;
-  let bf = 1.2 * bmi + 0.23 * p.age - 10.8 * sexFactor - 5.4;
-  if (p.isAthlete) bf *= 0.85;
-  return Math.max(3, Math.min(bf, 60));
-}
-
-function computePhysiqueRating(bodyFatPercent: number, muscleMass: number, weight: number): number {
-  if (bodyFatPercent > 25) return muscleMass > weight * 0.4 ? 2 : 1;
-  if (bodyFatPercent < 18) {
-    if (muscleMass > weight * 0.45) return 9;
-    if (muscleMass > weight * 0.4) return 8;
-    return 7;
-  }
-  if (muscleMass > weight * 0.45) return 6;
-  if (muscleMass < weight * 0.38) return 4;
-  return 5;
-}
-
-function r2(v: number): number {
-  return Math.round(v * 100) / 100;
-}
