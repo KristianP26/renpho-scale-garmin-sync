@@ -108,6 +108,7 @@ export class StandardGattScaleAdapter implements ScaleAdapter {
   readonly name = 'Standard GATT (BCS/WSS)';
   readonly charNotifyUuid = CHR_BODY_COMP_MEAS;
   readonly charWriteUuid = CHR_USER_CONTROL_POINT;
+  readonly normalizesWeight = true;
   /** UCP Consent opcode for user index 1 with consent code 0. */
   readonly unlockCommand = [0x02, 0x01, 0x00, 0x00];
   readonly unlockIntervalMs = 5000;

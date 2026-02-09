@@ -5,16 +5,20 @@ import type {
   GarminPayload,
   ScaleReading,
 } from './interfaces/scale-adapter.js';
+import type { WeightUnit } from './validate-env.js';
+
+const LBS_TO_KG = 0.453592;
 
 export interface ScanOptions {
   targetMac?: string;
   adapters: ScaleAdapter[];
   profile: UserProfile;
+  weightUnit?: WeightUnit;
   onLiveData?: (reading: ScaleReading) => void;
 }
 
 export function scanAndRead(opts: ScanOptions): Promise<GarminPayload> {
-  const { targetMac, adapters, profile, onLiveData } = opts;
+  const { targetMac, adapters, profile, weightUnit, onLiveData } = opts;
   const targetId: string | undefined = targetMac?.toLowerCase().replace(/:/g, '');
 
   return new Promise<GarminPayload>((resolve, reject) => {
@@ -132,6 +136,12 @@ export function scanAndRead(opts: ScanOptions): Promise<GarminPayload> {
 
             const reading: ScaleReading | null = matchedAdapter.parseNotification(data);
             if (!reading) return;
+
+            // Convert lbs → kg when the user declared lbs and the adapter
+            // doesn't already normalise to kg internally.
+            if (weightUnit === 'lbs' && !matchedAdapter.normalizesWeight) {
+              reading.weight *= LBS_TO_KG;
+            }
 
             if (onLiveData) {
               onLiveData(reading);

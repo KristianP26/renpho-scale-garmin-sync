@@ -34,6 +34,8 @@ export interface ScaleAdapter {
   readonly charWriteUuid: string;
   readonly unlockCommand: number[];
   readonly unlockIntervalMs: number;
+  /** True if parseNotification() already converts any non-kg reading to kg. */
+  readonly normalizesWeight?: boolean;
 
   matches(peripheral: Peripheral): boolean;
   parseNotification(data: Buffer): ScaleReading | null;

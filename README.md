@@ -116,7 +116,9 @@ WEIGHT_UNIT=kg
 HEIGHT_UNIT=cm
 ```
 
-`WEIGHT_UNIT` and `HEIGHT_UNIT` are **optional** and default to metric (`kg` / `cm`). Set `WEIGHT_UNIT=lbs` to display weight in pounds, and `HEIGHT_UNIT=in` to enter `USER_HEIGHT` in inches. All internal calculations and Garmin uploads remain in metric — conversion happens only at input (height) and display (weight).
+`WEIGHT_UNIT` and `HEIGHT_UNIT` are **optional** and default to metric (`kg` / `cm`). Set `HEIGHT_UNIT=in` to enter `USER_HEIGHT` in inches. Set `WEIGHT_UNIT=lbs` if your scale transmits in pounds — the app will convert to kg for calculations and display weight in lbs. All internal calculations and Garmin uploads remain in metric.
+
+> **Note:** Some adapters (Mi Scale 2, Standard GATT BCS/WSS, Sanitas SBF72/73) auto-detect the scale's unit from BLE flags and always normalize to kg. For those scales, `WEIGHT_UNIT` only affects console display. For all other scales, `WEIGHT_UNIT=lbs` also converts the raw scale reading from lbs to kg before processing.
 
 `SCALE_MAC` is **optional**. If omitted, the app auto-discovers any recognized scale during `npm start`. To pin to a specific device, add:
 
@@ -136,7 +138,7 @@ All environment variables are validated at startup with clear error messages:
 | `USER_BIRTH_YEAR` | Yes      | Number, 1900–current year, age >= 5                  |
 | `USER_GENDER`     | Yes      | `male` or `female` (case-insensitive)                |
 | `USER_IS_ATHLETE` | Yes      | `true`/`false`/`yes`/`no`/`1`/`0`                    |
-| `WEIGHT_UNIT`     | No       | `kg` or `lbs` (default: `kg`) — display only         |
+| `WEIGHT_UNIT`     | No       | `kg` or `lbs` (default: `kg`) — display + scale input |
 | `HEIGHT_UNIT`     | No       | `cm` or `in` (default: `cm`) — for `USER_HEIGHT`    |
 | `SCALE_MAC`       | No       | Format `XX:XX:XX:XX:XX:XX` if provided               |
 
@@ -304,6 +306,7 @@ To support a new scale brand, create a class that implements `ScaleAdapter` in `
 2. Define `matches()` to recognize the device by its BLE advertisement name
 3. Implement `parseNotification()` for the brand's data protocol
 4. Register the adapter in `src/scales/index.ts`
+5. If your adapter detects the weight unit from BLE data and converts to kg internally (like the standard BCS/WSS protocol does), set `normalizesWeight = true`. This prevents double-conversion when the user sets `WEIGHT_UNIT=lbs`.
 
 ## Athlete Mode
 

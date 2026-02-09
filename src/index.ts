@@ -48,6 +48,7 @@ async function main(): Promise<void> {
     targetMac: SCALE_MAC,
     adapters,
     profile,
+    weightUnit,
     onLiveData(reading) {
       const impStr: string = reading.impedance > 0 ? `${reading.impedance} Ohm` : 'Measuring...';
       process.stdout.write(

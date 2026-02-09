@@ -26,6 +26,7 @@ export class MiScale2Adapter implements ScaleAdapter {
   readonly name = 'Xiaomi Mi Scale 2';
   readonly charNotifyUuid = CHR_MI_HISTORY;
   readonly charWriteUuid = CHR_MI_HISTORY;
+  readonly normalizesWeight = true;
   /** ENABLE_HISTORY_MAGIC — triggers the scale to start streaming data. */
   readonly unlockCommand = [0x01, 0x96, 0x8a, 0xbd, 0x62];
   readonly unlockIntervalMs = 3000;
