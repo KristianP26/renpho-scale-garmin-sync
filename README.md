@@ -89,7 +89,7 @@ cd renpho-scale-garmin-sync
 npm install
 
 # Install Python dependencies
-pip install -r requirements.txt
+pip3 install -r requirements.txt    # or: pip install -r requirements.txt
 ```
 
 ## Configuration
@@ -137,6 +137,8 @@ npm run setup-garmin
 ```
 
 This logs into Garmin using the credentials in your `.env` and stores authentication tokens locally (default: `~/.garmin_renpho_tokens/`). You only need to do this once — tokens are reused for subsequent syncs.
+
+> **Note:** On Linux/macOS, if `python` is not available, run the script directly with `python3 scripts/setup_garmin.py`.
 
 > **If authentication fails:** Garmin may block requests from certain IPs (especially cloud/VPN IPs). Try running the setup from a different network, then copy the `~/.garmin_renpho_tokens/` directory to your target machine.
 
