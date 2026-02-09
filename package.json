@@ -20,7 +20,7 @@
     "health"
   ],
   "author": "Kristián Partl",
-  "license": "MIT",
+  "license": "GPL-3.0",
   "dependencies": {
     "@abandonware/noble": "^1.9.2-25",
     "dotenv": "^16.4.7"
