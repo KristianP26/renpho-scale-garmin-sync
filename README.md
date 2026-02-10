@@ -1,60 +1,58 @@
-# ⚖️ BLE Scale Sync
+# BLE Scale Sync
 
-> ⚠️ **Work in Progress** — Under active development. Expect breaking changes and rough edges.
+> **Work in Progress** — Under active development. Expect breaking changes.
 
-**Step on your scale. Data lands in Garmin Connect. Done.**
+Step on your scale. Data lands in Garmin Connect. Done.
 
-A cross-platform CLI tool that reads body composition from any **BLE smart scale** and exports it wherever you need it. The ⭐ **killer feature** is **automatic Garmin Connect upload** — no phone app, no manual entry, no $150 Garmin Index scale. Just your cheap $30 BLE scale and a Raspberry Pi.
+A cross-platform CLI tool that reads body composition from any BLE smart scale and exports it wherever you need it. The **killer feature** is automatic **Garmin Connect upload** — no phone app, no manual entry, no $150 Garmin Index scale. Just your cheap $30 BLE scale and a Raspberry Pi.
 
-🏋️ **23 scale adapters** · 🖥️ **Linux / macOS / Windows** · 📡 **Garmin Connect + MQTT** · 🧮 **10 body composition metrics**
-
----
-
-## 💡 Why This Exists
-
-Garmin sells the **Index S2** scale (~$150) — Wi-Fi, notorious connectivity issues, inconsistent readings. Meanwhile, a $30 BLE scale has better hardware but no way to sync to Garmin Connect. The only workflow: open your phone app → wait for sync → manually type numbers into Garmin. Every. Single. Time.
-
-I didn't want to depend on a phone app or buy an overpriced Garmin scale. So I built this.
-
-A **Raspberry Pi Zero 2W** sits next to the scale, always on, always listening. Step on the scale, wait a few seconds, and the reading appears in Garmin Connect — **no phone, no app, no manual entry**. It just works.
+**23 scale adapters** · **Linux / macOS / Windows** · **Garmin Connect + MQTT** · **10 body composition metrics**
 
 ---
 
-## 🚀 Features
+## Why This Exists
 
-- ⭐ **Garmin Connect upload** — the only open-source tool that syncs cheap BLE scales directly to Garmin without a phone
-- 📡 **MQTT export** — publish to Home Assistant, Node-RED, Grafana, or any MQTT broker
-- 🔌 **Modular exporter system** — run multiple exports in parallel, add your own
-- 🏋️ **23 scale adapters** — auto-detects your scale brand via BLE advertisement
-- 🧮 **10 body metrics** — weight, BMI, body fat %, water %, bone mass, muscle mass, visceral fat, physique rating, BMR, metabolic age
-- 🖥️ **Cross-platform** — Linux (Raspberry Pi), macOS, Windows
-- 🔍 **Auto-discovery** — no config needed, just step on the scale
-- 🏃 **Athlete mode** — adjusted formulas for active users
+Garmin sells the Index S2 scale (~$150) — Wi-Fi, notorious connectivity issues, inconsistent readings. Meanwhile, a $30 BLE scale has better hardware but no way to sync to Garmin Connect. The only workflow: open your phone app, wait for sync, manually type numbers into Garmin. Every. Single. Time.
+
+A **Raspberry Pi Zero 2W** sits next to the scale, always on, always listening. Step on, wait a few seconds, and the reading appears in Garmin Connect — no phone, no app, no manual entry.
 
 ---
 
-## 📐 How It Works
+## Features
+
+- **Garmin Connect upload** — the only open-source tool that syncs cheap BLE scales directly to Garmin without a phone
+- **MQTT export** — publish to Home Assistant, Node-RED, Grafana, or any MQTT broker
+- **Modular exporter system** — run multiple exports in parallel, easy to extend
+- **23 scale adapters** — auto-detects your scale brand via BLE advertisement
+- **10 body metrics** — weight, BMI, body fat %, water %, bone mass, muscle mass, visceral fat, physique rating, BMR, metabolic age
+- **Cross-platform** — Linux (Raspberry Pi), macOS, Windows
+- **Auto-discovery** — no config needed, just step on the scale
+- **Athlete mode** — adjusted BIA formulas for active users
+
+---
+
+## How It Works
 
 ```
-                                              ┌───────────────────┐
-                                       ┌────> │  Garmin Connect ⭐│
-┌──────────────┐      ┌──────────────┐ │      └───────────────────┘
-│  BLE Scale   │ BLE  │  TypeScript  │ │      ┌───────────────────┐
-│  (Bluetooth) │ ───> │  BLE + Body  │ ├────> │   MQTT Broker  📡 │
-└──────────────┘      │  Composition │ │      └───────────────────┘
-                      └──────────────┘ │      ┌───────────────────┐
-                                       └────> │  Future exports…  │
-                                              └───────────────────┘
+                                          ┌───────────────────┐
+                                   ┌────> │  Garmin Connect   │
+┌──────────────┐    ┌────────────┐ │      └───────────────────┘
+│  BLE Scale   │    │ TypeScript │ │      ┌───────────────────┐
+│  (Bluetooth) │ ─> │ BLE + Body │ ├────> │   MQTT Broker     │
+└──────────────┘    │ Composition│ │      └───────────────────┘
+                    └────────────┘ │      ┌───────────────────┐
+                                   └────> │  Future exports…  │
+                                          └───────────────────┘
 ```
 
-1. **TypeScript** scans for a BLE scale using the OS-appropriate handler
+1. TypeScript scans for a BLE scale using the OS-appropriate handler
 2. Auto-detects the brand via adapter pattern and reads weight + impedance
 3. Calculates 10 body composition metrics from BIA formulas
-4. Dispatches results **in parallel** to all enabled exporters
+4. Dispatches results in parallel to all enabled exporters
 
 ---
 
-## 📋 Supported Scales
+## Supported Scales
 
 | Brand / Model                                        | Protocol               |
 | ---------------------------------------------------- | ---------------------- |
@@ -82,11 +80,11 @@ A **Raspberry Pi Zero 2W** sits next to the scale, always on, always listening. 
 | **Hoffen** BS-8107                                   | Custom (FFB0)          |
 | Any **standard BT SIG BCS/WSS** scale                | Standard (181B / 181D) |
 
-> 💡 Don't see your scale? It might still work via the **Standard GATT** catch-all adapter. Try `npm run scan` first.
+Don't see your scale? It might still work via the Standard GATT catch-all adapter. Try `npm run scan` first.
 
 ---
 
-## 🛠️ Prerequisites
+## Prerequisites
 
 ### All Platforms
 
@@ -94,7 +92,7 @@ A **Raspberry Pi Zero 2W** sits next to the scale, always on, always listening. 
 - [Python](https://python.org/) 3.9+ (for Garmin upload)
 - Bluetooth Low Energy (BLE) adapter
 
-### 🐧 Linux (Debian / Ubuntu / Raspberry Pi OS)
+### Linux (Debian / Ubuntu / Raspberry Pi OS)
 
 ```bash
 sudo apt-get update
@@ -108,7 +106,7 @@ sudo apt-get install -y nodejs
 sudo setcap cap_net_raw+eip $(eval readlink -f $(which node))
 ```
 
-### 🍎 macOS
+### macOS
 
 ```bash
 xcode-select --install          # Xcode command-line tools
@@ -117,7 +115,7 @@ brew install node@20             # Node.js via Homebrew
 
 No additional Bluetooth setup needed — macOS uses CoreBluetooth natively.
 
-### 🪟 Windows
+### Windows
 
 1. Install [Node.js](https://nodejs.org/) v20+ (LTS installer, check "Add to PATH")
 2. Install [Visual Studio Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) ("Desktop development with C++")
@@ -126,7 +124,7 @@ No additional Bluetooth setup needed — macOS uses CoreBluetooth natively.
 
 ---
 
-## 📦 Installation
+## Installation
 
 ```bash
 git clone https://github.com/KristianP26/blescalesync.git
@@ -141,35 +139,35 @@ source venv/bin/activate        # Windows: venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-> 📝 Modern Linux distros (Debian 12+, Ubuntu 23.04+, Raspberry Pi OS Bookworm) require a venv for pip. Remember to `source venv/bin/activate` before running `npm start`.
+> Modern Linux distros (Debian 12+, Ubuntu 23.04+, Raspberry Pi OS Bookworm) require a venv for pip. Remember to `source venv/bin/activate` before running `npm start`.
 
 ---
 
-## ⚙️ Configuration
+## Configuration
 
-### 1️⃣ Create your `.env` file
+### 1. Create your `.env` file
 
 ```bash
 cp .env.example .env
 ```
 
 ```ini
-# 🔑 Garmin credentials
+# Garmin credentials
 GARMIN_EMAIL=you@example.com
 GARMIN_PASSWORD=your_password
 
-# 👤 User profile
+# User profile
 USER_HEIGHT=183
 USER_BIRTH_DATE=2000-06-15
 USER_GENDER=male
 USER_IS_ATHLETE=true
 
-# 📏 Units (optional, defaults to metric)
+# Units (optional, defaults to metric)
 WEIGHT_UNIT=kg
 HEIGHT_UNIT=cm
 ```
 
-### 2️⃣ Find your scale (optional)
+### 2. Find your scale (optional)
 
 ```bash
 npm run scan
@@ -181,11 +179,11 @@ Scans for 15 seconds. Recognized scales are tagged (e.g. `[QN Scale]`, `[Mi Scal
 SCALE_MAC=FF:03:00:13:A1:04
 ```
 
-> 🔒 **Recommended:** Set `SCALE_MAC` to avoid connecting to a neighbor's scale — BLE signals pass through walls.
+> **Recommended:** Set `SCALE_MAC` to avoid connecting to a neighbor's scale — BLE signals pass through walls.
 >
-> 🍎 On macOS, use the CoreBluetooth UUID shown by `npm run scan` instead of a MAC address.
+> On macOS, use the CoreBluetooth UUID shown by `npm run scan` instead of a MAC address.
 
-### 3️⃣ Authenticate with Garmin Connect
+### 3. Authenticate with Garmin Connect
 
 ```bash
 npm run setup-garmin
@@ -193,9 +191,9 @@ npm run setup-garmin
 
 One-time login — tokens are saved to `~/.garmin_tokens/` and reused automatically.
 
-> 💡 If auth fails, Garmin may block your IP (cloud/VPN). Try from a different network, then copy `~/.garmin_tokens/` to your target machine.
+> If auth fails, Garmin may block your IP (cloud/VPN). Try from a different network, then copy `~/.garmin_tokens/` to your target machine.
 
-### 4️⃣ Configure exporters (optional)
+### 4. Configure exporters (optional)
 
 By default, only **Garmin Connect** is active:
 
@@ -207,9 +205,9 @@ EXPORTERS=mqtt                # MQTT only
 
 All exporters run in parallel. The app only fails if **all** exporters fail.
 
-#### 📡 MQTT Exporter
+#### MQTT Exporter
 
-Publishes the full body composition payload as JSON — perfect for **Home Assistant**, **Node-RED**, **Grafana**, or any MQTT-compatible system.
+Publishes the full body composition payload as JSON — works with Home Assistant, Node-RED, Grafana, or any MQTT-compatible system.
 
 ```ini
 EXPORTERS=garmin,mqtt
@@ -234,7 +232,7 @@ MQTT_BROKER_URL=mqtt://localhost:1883
 
 ---
 
-## 🏃 Usage
+## Usage
 
 ### Sync your scale
 
@@ -243,7 +241,7 @@ npm start
 ```
 
 1. App scans for your scale (auto-discovery or by `SCALE_MAC`)
-2. **Step on the scale** — wait for the reading to stabilize
+2. Step on the scale — wait for the reading to stabilize
 3. Body composition is calculated and exported to all enabled targets
 
 ### Dry run (skip exports)
@@ -262,23 +260,23 @@ $env:DEBUG="true"; npm start              # Windows PowerShell
 
 ---
 
-## 🧮 What Gets Exported
+## Body Composition Metrics
 
-| Metric          | Unit  | Formula                                                                |
-| --------------- | ----- | ---------------------------------------------------------------------- |
-| Weight          | kg    | Raw scale reading                                                      |
-| BMI             | —     | `weight / (height_m)²`                                                 |
+| Metric          | Unit  | Formula                                                                   |
+| --------------- | ----- | ------------------------------------------------------------------------- |
+| Weight          | kg    | Raw scale reading                                                         |
+| BMI             | —     | `weight / (height_m)²`                                                    |
 | Body Fat        | %     | BIA: `LBM = c1·(H²/Z) + c2·W + c3·A + c4`, `BF% = (W - LBM) / W × 100` |
-| Water           | %     | `LBM × 0.73 / W × 100` (athlete: 0.74)                                 |
-| Bone Mass       | kg    | `LBM × 0.042`                                                          |
-| Muscle Mass     | kg    | `LBM × 0.54` (athlete: 0.60)                                           |
-| Visceral Fat    | 1–59  | `BF% × 0.55 − 4 + age × 0.08`                                          |
-| Physique Rating | 1–9   | Based on BF% and muscle/weight ratio                                   |
-| BMR             | kcal  | Mifflin-St Jeor: `10W + 6.25H − 5A + s` (athlete: +5%)                 |
-| Metabolic Age   | years | `age + (idealBMR − BMR) / 15`                                          |
+| Water           | %     | `LBM × 0.73 / W × 100` (athlete: 0.74)                                   |
+| Bone Mass       | kg    | `LBM × 0.042`                                                             |
+| Muscle Mass     | kg    | `LBM × 0.54` (athlete: 0.60)                                              |
+| Visceral Fat    | 1–59  | `BF% × 0.55 − 4 + age × 0.08`                                            |
+| Physique Rating | 1–9   | Based on BF% and muscle/weight ratio                                      |
+| BMR             | kcal  | Mifflin-St Jeor: `10W + 6.25H − 5A + s` (athlete: +5%)                   |
+| Metabolic Age   | years | `age + (idealBMR − BMR) / 15`                                             |
 
 <details>
-<summary>📊 BIA coefficients</summary>
+<summary>BIA coefficients</summary>
 
 |                  | c1    | c2    | c3     | c4   |
 | ---------------- | ----- | ----- | ------ | ---- |
@@ -287,7 +285,7 @@ $env:DEBUG="true"; npm start              # Windows PowerShell
 | Female           | 0.490 | 0.150 | −0.130 | 11.5 |
 | Female (athlete) | 0.550 | 0.180 | −0.150 | 8.5  |
 
-When impedance is unavailable, body fat uses the **Deurenberg** formula:
+When impedance is unavailable, body fat uses the Deurenberg formula:
 `BF% = 1.2 × BMI + 0.23 × age − 10.8 × sex − 5.4` (sex: 1 = male, 0 = female; athlete: ×0.85)
 
 Scales that report their own body composition (Mi Scale 2, Yunmai) use those values directly.
@@ -296,25 +294,25 @@ Scales that report their own body composition (Mi Scale 2, Yunmai) use those val
 
 ---
 
-## 🏋️ Athlete Mode
+## Athlete Mode
 
 `USER_IS_ATHLETE=true` adjusts the calculation constants for active users:
 
-- 💪 **Lean Body Mass** — higher coefficients
-- 💧 **Water** — 74% vs 73% of LBM
-- 🦴 **Muscle Mass** — 60% vs 54% of LBM
-- 🔥 **BMR** — +5% boost
-- 📅 **Metabolic Age** — capped at actual age − 5
+- **Lean Body Mass** — higher BIA coefficients
+- **Water** — 74% vs 73% of LBM
+- **Muscle Mass** — 60% vs 54% of LBM
+- **BMR** — +5% boost
+- **Metabolic Age** — capped at actual age − 5
 
 ---
 
-## 🧑‍💻 Development
+## Development
 
 ### Testing
 
 ```bash
-npm test                    # All 500+ tests (Vitest)
-npx vitest run tests/calculator.test.ts   # Single file
+npm test                                   # All 500+ tests (Vitest)
+npx vitest run tests/calculator.test.ts    # Single file
 ```
 
 Covers: body comp math, env validation, all 23 scale adapters, exporter config/Garmin/MQTT/registry.
@@ -330,35 +328,35 @@ npm run format:check        # Prettier check (CI)
 
 ---
 
-## 🗂️ Project Structure
+## Project Structure
 
 ```
 blescalesync/
 ├── src/
-│   ├── index.ts                    # 🎯 Main orchestrator
-│   ├── ble/                        # 📶 BLE layer (OS-specific handlers)
-│   │   ├── index.ts                #    OS detection + dynamic import
-│   │   ├── handler-node-ble.ts     #    🐧 Linux (BlueZ D-Bus)
-│   │   ├── handler-noble.ts        #    🍎🪟 macOS / Windows (noble)
-│   │   ├── shared.ts               #    Shared BLE abstractions
-│   │   └── types.ts                #    Types, constants, utilities
-│   ├── exporters/                   # 📤 Modular export system
-│   │   ├── index.ts                #    Exporter registry
-│   │   ├── config.ts               #    EXPORTERS env parsing
-│   │   ├── garmin.ts               #    ⭐ Garmin Connect (Python subprocess)
-│   │   └── mqtt.ts                 #    📡 MQTT broker
-│   ├── scales/                      # ⚖️ 23 scale adapters
-│   │   ├── index.ts                #    Adapter registry
-│   │   ├── body-comp-helpers.ts    #    Shared BIA formulas
-│   │   └── *.ts                    #    One file per scale brand
-│   ├── interfaces/                  # 📝 TypeScript interfaces
-│   │   ├── scale-adapter.ts        #    ScaleAdapter + types
-│   │   └── exporter.ts             #    Exporter interface
-│   ├── calculator.ts               # 🧮 Body composition math
-│   ├── validate-env.ts             # ✅ .env validation
-│   └── scan.ts                     # 🔍 BLE scanner utility
-├── tests/                           # 🧪 500+ tests (Vitest)
-├── garmin-scripts/                  # 🐍 Python (Garmin upload + setup)
+│   ├── index.ts                    # Main orchestrator
+│   ├── ble/                        # BLE layer (OS-specific handlers)
+│   │   ├── index.ts                #   OS detection + dynamic import
+│   │   ├── handler-node-ble.ts     #   Linux (BlueZ D-Bus)
+│   │   ├── handler-noble.ts        #   macOS / Windows (noble)
+│   │   ├── shared.ts               #   Shared BLE abstractions
+│   │   └── types.ts                #   Types, constants, utilities
+│   ├── exporters/                   # Modular export system
+│   │   ├── index.ts                #   Exporter registry
+│   │   ├── config.ts               #   EXPORTERS env parsing
+│   │   ├── garmin.ts               #   Garmin Connect (Python subprocess)
+│   │   └── mqtt.ts                 #   MQTT broker
+│   ├── scales/                      # 23 scale adapters
+│   │   ├── index.ts                #   Adapter registry
+│   │   ├── body-comp-helpers.ts    #   Shared BIA formulas
+│   │   └── *.ts                    #   One file per scale brand
+│   ├── interfaces/                  # TypeScript interfaces
+│   │   ├── scale-adapter.ts        #   ScaleAdapter + types
+│   │   └── exporter.ts             #   Exporter interface
+│   ├── calculator.ts               # Body composition math
+│   ├── validate-env.ts             # .env validation
+│   └── scan.ts                     # BLE scanner utility
+├── tests/                           # 500+ tests (Vitest)
+├── garmin-scripts/                  # Python (Garmin upload + setup)
 ├── .env.example
 ├── package.json
 ├── tsconfig.json
@@ -367,7 +365,7 @@ blescalesync/
 
 ---
 
-## ➕ Adding a New Scale
+## Adding a New Scale
 
 1. Create `src/scales/your-brand.ts` implementing `ScaleAdapter`
 2. Define `matches()` to recognize the device by BLE name
@@ -375,7 +373,7 @@ blescalesync/
 4. Register in `src/scales/index.ts` (before the Standard GATT catch-all)
 5. Add tests in `tests/scales/`
 
-## ➕ Adding a New Exporter
+## Adding a New Exporter
 
 1. Create `src/exporters/your-exporter.ts` implementing `Exporter`
 2. Add the name to `ExporterName` type in `src/exporters/config.ts`
@@ -386,10 +384,10 @@ blescalesync/
 
 ---
 
-## 🔧 Troubleshooting
+## Troubleshooting
 
 <details>
-<summary>🐧 "Permission denied" on Linux</summary>
+<summary>"Permission denied" on Linux</summary>
 
 ```bash
 sudo setcap cap_net_raw+eip $(eval readlink -f $(which node))
@@ -398,7 +396,7 @@ sudo setcap cap_net_raw+eip $(eval readlink -f $(which node))
 </details>
 
 <details>
-<summary>🔍 Scale not found</summary>
+<summary>Scale not found</summary>
 
 - Step on the scale to wake it up
 - Verify `SCALE_MAC` matches (`npm run scan`)
@@ -408,7 +406,7 @@ sudo setcap cap_net_raw+eip $(eval readlink -f $(which node))
 </details>
 
 <details>
-<summary>🍇 Connection errors on Raspberry Pi (le-connection-abort-by-local)</summary>
+<summary>Connection errors on Raspberry Pi (le-connection-abort-by-local)</summary>
 
 The app automatically stops discovery before connecting. If issues persist:
 
@@ -419,7 +417,7 @@ sudo systemctl restart bluetooth
 </details>
 
 <details>
-<summary>🔍 Scale was found before but now isn't discovered (Linux)</summary>
+<summary>Scale was found before but now isn't discovered (Linux)</summary>
 
 BlueZ can get into a stale state. Fix:
 
@@ -432,7 +430,7 @@ Step on the scale, then run `npm start`. Re-apply setcap after Node.js updates.
 </details>
 
 <details>
-<summary>⭐ Garmin upload fails</summary>
+<summary>Garmin upload fails</summary>
 
 - Re-run `npm run setup-garmin` to refresh tokens
 - Check credentials in `.env`
@@ -441,7 +439,7 @@ Step on the scale, then run `npm start`. Re-apply setcap after Node.js updates.
 </details>
 
 <details>
-<summary>🪟 Windows BLE issues</summary>
+<summary>Windows BLE issues</summary>
 
 - Bluetooth adapter must use WinUSB driver ([Zadig](https://zadig.akeo.ie/))
 - Run terminal as Administrator if needed
@@ -450,17 +448,17 @@ Step on the scale, then run `npm start`. Re-apply setcap after Node.js updates.
 
 ---
 
-## 🏅 Recommended Setup
+## Recommended Setup
 
-| Component   | Recommendation                                                                                                            |
-| ----------- | ------------------------------------------------------------------------------------------------------------------------- |
-| 🖥️ Computer | [Raspberry Pi Zero 2W](https://www.raspberrypi.com/products/raspberry-pi-zero-2-w/) — $15, tiny, built-in BLE, ~0.4W idle |
-| ⚖️ Scale    | Any supported BLE scale (see table above)                                                                                 |
-| 💿 OS       | Raspberry Pi OS Lite (headless)                                                                                           |
+| Component | Recommendation                                                                                                          |
+| --------- | ----------------------------------------------------------------------------------------------------------------------- |
+| Computer  | [Raspberry Pi Zero 2W](https://www.raspberrypi.com/products/raspberry-pi-zero-2-w/) — $15, tiny, built-in BLE, ~0.4W idle |
+| Scale     | Any supported BLE scale (see table above)                                                                                |
+| OS        | Raspberry Pi OS Lite (headless)                                                                                          |
 
 ---
 
-## 🙏 Credits
+## Credits
 
 **Scale Protocols** — Ported from [openScale](https://github.com/oliexdev/openScale) by oliexdev. All 23 adapters cross-referenced against the Java/Kotlin source.
 
@@ -470,6 +468,6 @@ Step on the scale, then run `npm start`. Re-apply setcap after Node.js updates.
 
 ---
 
-## 📄 License
+## License
 
 GPL-3.0 — see [LICENSE](LICENSE) for details.
