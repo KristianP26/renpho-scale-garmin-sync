@@ -1,5 +1,7 @@
 # Renpho Scale → Garmin Connect Sync
 
+> **⚠️ Work in Progress** — This project is under active development and is **not production-ready**. Expect breaking changes, incomplete features, and rough edges. Use at your own risk.
+
 A cross-platform CLI tool that reads body composition data from a **BLE smart scale** and uploads it to **Garmin Connect**. Built with an adapter pattern supporting **20+ scale brands** out of the box.
 
 Works on **Linux** (including Raspberry Pi), **macOS**, and **Windows**.
