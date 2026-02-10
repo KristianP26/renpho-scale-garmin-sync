@@ -367,7 +367,7 @@ sudo setcap cap_net_raw+eip $(eval readlink -f $(which node))
 
 - Make sure the scale is powered on (step on it to wake it up).
 - If using a specific `SCALE_MAC`, verify the address matches (`npm run scan`).
-- If using auto-discovery, ensure only one recognized scale is powered on nearby.
+- If using auto-discovery, ensure only one recognized scale is powered on nearby. Auto-discovery works on all platforms (Linux, macOS, Windows) — all adapters match by device name, so `SCALE_MAC` is never required.
 - On Linux, ensure the Bluetooth service is running: `sudo systemctl start bluetooth`.
 
 ### Connection errors on Raspberry Pi Zero (le-connection-abort-by-local)

@@ -36,16 +36,34 @@ describe('QnScaleAdapter', () => {
       expect(adapter.matches(p)).toBe(true);
     });
 
-    it('does not match unknown name', () => {
+    it('matches name with unrelated service UUIDs', () => {
       const adapter = makeAdapter();
-      const p = mockPeripheral('Random Scale', ['fff0']);
+      const p = mockPeripheral('QN-Scale', ['1234']);
+      expect(adapter.matches(p)).toBe(true);
+    });
+
+    it('matches name with empty service UUIDs (Linux scan)', () => {
+      const adapter = makeAdapter();
+      const p = mockPeripheral('QN-Scale', []);
+      expect(adapter.matches(p)).toBe(true);
+    });
+
+    it('matches by UUID alone for unnamed device', () => {
+      const adapter = makeAdapter();
+      const p = mockPeripheral('', ['fff0']);
+      expect(adapter.matches(p)).toBe(true);
+    });
+
+    it('does not match unknown name without QN UUID', () => {
+      const adapter = makeAdapter();
+      const p = mockPeripheral('Random Scale', ['1234']);
       expect(adapter.matches(p)).toBe(false);
     });
 
-    it('does not match correct name without service UUID', () => {
+    it('matches unknown name with QN UUID (UUID fallback)', () => {
       const adapter = makeAdapter();
-      const p = mockPeripheral('QN-Scale', ['1234']);
-      expect(adapter.matches(p)).toBe(false);
+      const p = mockPeripheral('Random Scale', ['fff0']);
+      expect(adapter.matches(p)).toBe(true);
     });
 
     it('name matching is case-insensitive', () => {

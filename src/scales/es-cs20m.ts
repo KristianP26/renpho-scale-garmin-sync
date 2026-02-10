@@ -54,8 +54,7 @@ export class EsCs20mAdapter implements ScaleAdapter {
     if (data.length < 2) return null;
 
     // Robust msgId: try data[2] first (with 55 AA header), fall back to data[0] (stripped)
-    const msgId =
-      data.length > 2 && (data[2] === 0x14 || data[2] === 0x15) ? data[2] : data[0];
+    const msgId = data.length > 2 && (data[2] === 0x14 || data[2] === 0x15) ? data[2] : data[0];
 
     if (msgId === 0x15) {
       // Extended frame — resistance only

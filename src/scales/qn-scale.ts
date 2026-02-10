@@ -74,9 +74,12 @@ export class QnScaleAdapter implements ScaleAdapter {
   private weightScaleFactor = 100;
 
   /**
-   * openScale: requires BOTH name match AND service UUID match.
-   * Names: "qn-scale", "renpho-scale" (from QNHandler.kt)
-   *        "senssun", "sencor" (QN-compatible devices not in original QNHandler)
+   * Name match is sufficient (brand names are unambiguous).
+   * UUID fallback covers unnamed devices advertising QN vendor services.
+   *
+   * Note: openScale requires BOTH name AND UUID, but on Linux (node-ble / BlueZ
+   * D-Bus) advertised service UUIDs are not available before connection, so
+   * name-only matching is needed for auto-discovery without SCALE_MAC.
    */
   matches(device: BleDeviceInfo): boolean {
     const name = (device.localName || '').toLowerCase();
@@ -85,9 +88,9 @@ export class QnScaleAdapter implements ScaleAdapter {
       name.includes('renpho') ||
       name.includes('senssun') ||
       name.includes('sencor');
-    if (!nameMatch) return false;
+    if (nameMatch) return true;
 
-    // Require QN vendor service UUID (matching openScale's supportFor logic)
+    // Fallback: match by QN vendor service UUID for unnamed devices
     const uuids = (device.serviceUuids || []).map((u) => u.toLowerCase());
     return uuids.some(
       (u) => u === SVC_T1 || u === SVC_T2 || u === uuid16(0xffe0) || u === uuid16(0xfff0),
