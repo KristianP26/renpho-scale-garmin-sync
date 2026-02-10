@@ -435,7 +435,17 @@ $env:DEBUG="true"; npm start
 
 ## Credits
 
-Scale BLE protocols were ported from [**openScale**](https://github.com/oliexdev/openScale), an open-source Android app for Bluetooth scales by oliexdev and contributors. All 23 adapters have been cross-referenced against the openScale Java/Kotlin source to verify byte offsets, init sequences, and protocol correctness.
+### Scale Protocols
+
+BLE protocols were ported from [**openScale**](https://github.com/oliexdev/openScale), an open-source Android app for Bluetooth scales by oliexdev and contributors. All 23 adapters have been cross-referenced against the openScale Java/Kotlin source to verify byte offsets, init sequences, and protocol correctness.
+
+### Body Composition Formulas
+
+| Formula | Authors | Used For |
+| --- | --- | --- |
+| **BIA** (Bioelectrical Impedance Analysis) | Lukaski H.C. et al. (1986) — *"Assessment of fat-free mass using bioelectrical impedance measurements of the human body"*, American Journal of Clinical Nutrition | Body fat % from impedance — the core algorithm |
+| **Mifflin-St Jeor** | Mifflin M.D., St Jeor S.T. et al. (1990) — *"A new predictive equation for resting energy expenditure in healthy individuals"*, American Journal of Clinical Nutrition | Basal Metabolic Rate (BMR) |
+| **Deurenberg** | Deurenberg P., Weststrate J.A., Seidell J.C. (1991) — *"Body mass index as a measure of body fatness: age- and sex-specific prediction formulas"*, British Journal of Nutrition | Body fat % fallback when impedance is unavailable |
 
 ## License
 
