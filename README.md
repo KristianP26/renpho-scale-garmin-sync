@@ -6,6 +6,22 @@ A cross-platform CLI tool that reads body composition data from a **BLE smart sc
 
 Works on **Linux** (including Raspberry Pi), **macOS**, and **Windows**.
 
+## Why This Exists
+
+I own a **Renpho ES-CS20M** scale — it measures weight and body impedance over Bluetooth, but the Renpho app has no way to sync data to **Garmin Connect**. The only workflow was: open the Renpho app on your phone, wait for it to sync, then manually type the numbers into Garmin. Every single time.
+
+I didn't want to depend on a phone app at all. So I built this tool. A **Raspberry Pi Zero 2W** sits next to the scale, always on, always listening. Step on the scale, wait a few seconds, and the reading appears in Garmin Connect — **no phone needed, no app, no manual entry**. It just works.
+
+While the project started for one scale, it now supports **23 scale adapters** covering most popular BLE smart scales, so it works regardless of brand.
+
+### Recommended Setup
+
+| Component | Recommendation |
+| --- | --- |
+| **Single-board computer** | [Raspberry Pi Zero 2W](https://www.raspberrypi.com/products/raspberry-pi-zero-2-w/) — cheap, tiny, built-in BLE, low power (~0.4W idle) |
+| **Scale** | Any supported BLE scale (see list below) |
+| **OS** | Raspberry Pi OS Lite (headless, no desktop needed) |
+
 ### Supported Scales
 
 | Brand / Model                                        | Protocol               |
