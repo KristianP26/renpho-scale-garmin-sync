@@ -130,7 +130,7 @@ export function scanAndRead(opts: ScanOptions): Promise<GarminPayload> {
     noble.on('stateChange', onStateChange);
 
     function connectToPeripheral(peripheral: Peripheral, adapter: ScaleAdapter): void {
-      if (resolved || connecting) return;
+      if (resolved) return;
       connecting = true;
       const myGen = ++connectGen;
 
@@ -139,6 +139,16 @@ export function scanAndRead(opts: ScanOptions): Promise<GarminPayload> {
         if (resolved || !connecting || myGen !== connectGen) return;
         retryOrFail('Connection timed out', peripheral);
       }, CONNECT_TIMEOUT_MS);
+
+      // Register disconnect handler BEFORE connect so we catch disconnects
+      // that happen during the connection attempt (e.g. scale walks away).
+      // The connectGen check ensures stale handlers from previous attempts are ignored.
+      const onPeripheralDisconnect = (): void => {
+        peripheral.removeListener('disconnect', onPeripheralDisconnect);
+        if (resolved || myGen !== connectGen) return;
+        retryOrFail('Scale disconnected', peripheral);
+      };
+      peripheral.on('disconnect', onPeripheralDisconnect);
 
       debug('Issuing peripheral.connect()...');
       peripheral.connect((err?: string) => {
@@ -167,15 +177,6 @@ export function scanAndRead(opts: ScanOptions): Promise<GarminPayload> {
           retryOrFail(`Connect error: ${err}`, peripheral);
           return;
         }
-
-        // Register disconnect handler AFTER successful connect to avoid
-        // spurious disconnect events on an unconnected peripheral
-        const onDisconnect = (): void => {
-          peripheral.removeListener('disconnect', onDisconnect);
-          if (resolved || myGen !== connectGen) return;
-          retryOrFail('Scale disconnected', peripheral);
-        };
-        peripheral.on('disconnect', onDisconnect);
 
         console.log('[BLE] Connected. Discovering services...');
         setupCharacteristics(peripheral, adapter);
@@ -347,14 +348,20 @@ export function scanAndRead(opts: ScanOptions): Promise<GarminPayload> {
             return;
           }
 
-          Promise.all(notifyChars.map(subscribeAndListen))
-            .then(() => {
-              console.log(
-                `[BLE] Subscribed to ${notifyChars.length} notification(s). Step on the scale.`,
-              );
-              return startInit();
-            })
-            .catch(handleInitError);
+          // Wire up data listeners and subscribe (fire-and-forget) for all notify chars.
+          // Don't block on subscribe completing — send init commands immediately.
+          for (const nc of notifyChars) {
+            const normalized = normalizeUuid(nc.uuid);
+            nc.on('data', (data: Buffer) => handleNotification(normalized, data));
+            nc.subscribe((subErr?: string) => {
+              if (subErr) console.error(`[BLE] Subscribe error on ${nc.uuid}: ${subErr}`);
+            });
+          }
+          console.log(
+            `[BLE] Subscribed to ${notifyChars.length} notification(s). Step on the scale.`,
+          );
+
+          startInit().catch(handleInitError);
 
           return;
         }
@@ -390,12 +397,16 @@ export function scanAndRead(opts: ScanOptions): Promise<GarminPayload> {
 
         debug(`Matched notify=${notifyChar.uuid}, write=${writeChar.uuid}`);
 
-        subscribeAndListen(notifyChar)
-          .then(() => {
-            console.log('[BLE] Subscribed to notifications. Step on the scale.');
-            return startInit();
-          })
-          .catch(handleInitError);
+        // Wire up data listener and subscribe (fire-and-forget).
+        // Don't block on subscribe completing — send unlock commands immediately.
+        const normalizedNotify = normalizeUuid(notifyChar.uuid);
+        notifyChar.on('data', (data: Buffer) => handleNotification(normalizedNotify, data));
+        notifyChar.subscribe((subErr?: string) => {
+          if (subErr) console.error(`[BLE] Subscribe error: ${subErr}`);
+        });
+        console.log('[BLE] Subscribed to notifications. Step on the scale.');
+
+        startInit().catch(handleInitError);
       });
     }
 
@@ -449,8 +460,6 @@ export function scanAndRead(opts: ScanOptions): Promise<GarminPayload> {
 
       const adapter = matchedAdapter;
       const doConnect = (): void => {
-        // Reset so connectToPeripheral can set it properly
-        connecting = false;
         connectToPeripheral(peripheral, adapter);
       };
 
