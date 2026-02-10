@@ -241,6 +241,25 @@ export async function scanAndRead(opts: ScanOptions): Promise<BodyComposition> {
       );
     }
 
+    // In continuous mode, BlueZ caches the device from a previous cycle.
+    // The cached D-Bus proxy becomes stale after destroy(), causing
+    // "interface not found in proxy object" errors on reconnect.
+    // Removing it forces a fresh discovery + proxy creation.
+    if (targetMac) {
+      try {
+        const devSerialized = `dev_${formatMac(targetMac).replace(/:/g, '_')}`;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const adapterHelper = (btAdapter as any).helper;
+        await adapterHelper.callMethod(
+          'RemoveDevice',
+          `${adapterHelper.object}/${devSerialized}`,
+        );
+        bleLog.debug('Removed stale device from BlueZ cache');
+      } catch {
+        // Device wasn't in cache — expected on first scan
+      }
+    }
+
     await startDiscoverySafe(btAdapter);
 
     let matchedAdapter: ScaleAdapter;
@@ -253,21 +272,35 @@ export async function scanAndRead(opts: ScanOptions): Promise<BodyComposition> {
         throw abortSignal.reason ?? new DOMException('Aborted', 'AbortError');
       }
 
-      const abortPromise = abortSignal
-        ? new Promise<never>((_resolve, reject) => {
-            const onAbort = () =>
-              reject(abortSignal.reason ?? new DOMException('Aborted', 'AbortError'));
-            abortSignal.addEventListener('abort', onAbort, { once: true });
-          })
-        : null;
-
       const waitPromise = withTimeout(
         btAdapter.waitDevice(mac),
         DISCOVERY_TIMEOUT_MS,
         `Device ${mac} not found within ${DISCOVERY_TIMEOUT_MS / 1000}s`,
       );
 
-      device = abortPromise ? await Promise.race([waitPromise, abortPromise]) : await waitPromise;
+      if (abortSignal) {
+        // Wrap in a promise that cleans up the abort listener in all paths
+        // to prevent MaxListenersExceededWarning in continuous mode
+        const sig = abortSignal;
+        device = await new Promise<Device>((resolve, reject) => {
+          const onAbort = () => {
+            reject(sig.reason ?? new DOMException('Aborted', 'AbortError'));
+          };
+          sig.addEventListener('abort', onAbort, { once: true });
+          waitPromise.then(
+            (d) => {
+              sig.removeEventListener('abort', onAbort);
+              resolve(d);
+            },
+            (err) => {
+              sig.removeEventListener('abort', onAbort);
+              reject(err);
+            },
+          );
+        });
+      } else {
+        device = await waitPromise;
+      }
 
       const name = await device.getName().catch(() => '');
       bleLog.debug(`Found device: ${name} [${mac}]`);
