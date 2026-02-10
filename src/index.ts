@@ -10,7 +10,10 @@ import { spawn } from 'node:child_process';
 import { scanAndRead } from './ble/index.js';
 import { adapters } from './scales/index.js';
 import { loadConfig } from './validate-env.js';
+import { createLogger } from './logger.js';
 import type { GarminPayload } from './interfaces/scale-adapter.js';
+
+const log = createLogger('Sync');
 
 const __dirname: string = dirname(fileURLToPath(import.meta.url));
 const ROOT: string = join(__dirname, '..');
@@ -40,13 +43,13 @@ function findPython(): Promise<string> {
 
 async function main(): Promise<void> {
   const modeLabel = dryRun ? 'Scale → Garmin Connect (dry run)' : 'Scale → Garmin Connect';
-  console.log(`\n[Sync] ${modeLabel}`);
+  log.info(`\n${modeLabel}`);
   if (SCALE_MAC) {
-    console.log(`[Sync] Scanning for scale ${SCALE_MAC}...`);
+    log.info(`Scanning for scale ${SCALE_MAC}...`);
   } else {
-    console.log(`[Sync] Scanning for any recognized scale...`);
+    log.info(`Scanning for any recognized scale...`);
   }
-  console.log(`[Sync] Adapters: ${adapters.map((a) => a.name).join(', ')}\n`);
+  log.info(`Adapters: ${adapters.map((a) => a.name).join(', ')}\n`);
 
   const payload: GarminPayload = await scanAndRead({
     targetMac: SCALE_MAC,
@@ -59,23 +62,21 @@ async function main(): Promise<void> {
     },
   });
 
-  console.log(
-    `\n\n[Sync] Measurement received: ${fmtWeight(payload.weight)} / ${payload.impedance} Ohm`,
-  );
-  console.log('[Sync] Body composition:');
+  log.info(`\n\nMeasurement received: ${fmtWeight(payload.weight)} / ${payload.impedance} Ohm`);
+  log.info('Body composition:');
   const kgMetrics = new Set(['boneMass', 'muscleMass']);
   const { weight: _w, impedance: _i, ...metrics } = payload;
   for (const [k, v] of Object.entries(metrics)) {
     const display = kgMetrics.has(k) ? fmtWeight(v) : String(v);
-    console.log(`  ${k}: ${display}`);
+    log.info(`  ${k}: ${display}`);
   }
 
   if (dryRun) {
-    console.log('\n[Sync] Dry run — skipping Garmin upload.');
+    log.info('\nDry run — skipping Garmin upload.');
     return;
   }
 
-  console.log('\n[Sync] Sending to Garmin uploader...');
+  log.info('\nSending to Garmin uploader...');
 
   const pythonCmd: string = await findPython();
   const MAX_RETRIES = 2;
@@ -83,21 +84,21 @@ async function main(): Promise<void> {
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     if (attempt > 0) {
-      console.log(`[Sync] Retrying upload (${attempt}/${MAX_RETRIES})...`);
+      log.info(`Retrying upload (${attempt}/${MAX_RETRIES})...`);
     }
 
     const result: UploadResult = await uploadToGarmin(payload, pythonCmd);
 
     if (result.success) {
-      console.log('[Sync] Done.');
+      log.info('Done.');
       return;
     }
 
     lastError = result.error;
-    console.error(`[Sync] Upload failed: ${lastError}`);
+    log.error(`Upload failed: ${lastError}`);
   }
 
-  console.error(`[Sync] All upload attempts failed.`);
+  log.error(`All upload attempts failed.`);
   process.exit(1);
 }
 
@@ -136,6 +137,6 @@ function uploadToGarmin(payload: GarminPayload, pythonCmd: string): Promise<Uplo
 }
 
 main().catch((err: Error) => {
-  console.error(`\n[Error] ${err.message}`);
+  log.error(err.message);
   process.exit(1);
 });

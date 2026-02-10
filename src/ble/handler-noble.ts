@@ -5,7 +5,7 @@ import type { ScanOptions, ScanResult } from './types.js';
 import type { BleChar, BleDevice } from './shared.js';
 import { waitForReading } from './shared.js';
 import {
-  debug,
+  bleLog,
   normalizeUuid,
   sleep,
   errMsg,
@@ -82,16 +82,16 @@ function wrapPeripheral(peripheral: Peripheral): BleDevice {
 async function connectWithRetries(peripheral: Peripheral, maxRetries: number): Promise<void> {
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
-      debug(`Connect attempt ${attempt + 1}/${maxRetries + 1}...`);
+      bleLog.debug(`Connect attempt ${attempt + 1}/${maxRetries + 1}...`);
       await withTimeout(peripheral.connectAsync(), CONNECT_TIMEOUT_MS, 'Connection timed out');
-      debug('Connected');
+      bleLog.debug('Connected');
       return;
     } catch (err: unknown) {
       const msg = errMsg(err);
       if (attempt >= maxRetries) {
         throw new Error(`Connection failed after ${maxRetries + 1} attempts: ${msg}`);
       }
-      console.log(`[BLE] Connect error: ${msg}. Retrying (${attempt + 1}/${maxRetries})...`);
+      bleLog.warn(`Connect error: ${msg}. Retrying (${attempt + 1}/${maxRetries})...`);
       try {
         await peripheral.disconnectAsync();
       } catch {
@@ -110,7 +110,7 @@ async function buildCharMap(peripheral: Peripheral): Promise<Map<string, BleChar
 
   for (const char of characteristics) {
     const normalized = normalizeUuid(char.uuid);
-    debug(`  Char ${char.uuid} (${normalized}) props=[${char.properties.join(',')}]`);
+    bleLog.debug(`  Char ${char.uuid} (${normalized}) props=[${char.properties.join(',')}]`);
     charMap.set(normalized, wrapChar(char));
   }
 
@@ -138,7 +138,7 @@ function discoverPeripheral(
     const heartbeatInterval = setInterval(() => {
       heartbeat++;
       if (heartbeat % 5 === 0) {
-        console.log('[BLE] Still scanning...');
+        bleLog.info('Still scanning...');
       }
     }, DISCOVERY_POLL_MS);
 
@@ -147,12 +147,12 @@ function discoverPeripheral(
       const addr = peripheralAddress(peripheral);
       const svcUuids = (peripheral.advertisement?.serviceUuids ?? []).map(normalizeUuid);
 
-      debug(`Discovered: ${name || '(no name)'} [${addr}]`);
+      bleLog.debug(`Discovered: ${name || '(no name)'} [${addr}]`);
 
       if (targetMac) {
         // Target mode: match by MAC or CoreBluetooth UUID
         if (!matchesTarget(peripheral, targetMac)) return;
-        debug(`Target device matched: ${name} [${addr}]`);
+        bleLog.debug(`Target device matched: ${name} [${addr}]`);
 
         clearTimeout(timeout);
         clearInterval(heartbeatInterval);
@@ -167,7 +167,7 @@ function discoverPeripheral(
         const matched = adapters.find((a) => a.matches(info));
         if (!matched) return;
 
-        console.log(`[BLE] Auto-discovered: ${matched.name} (${name} [${addr}])`);
+        bleLog.info(`Auto-discovered: ${matched.name} (${name} [${addr}])`);
 
         clearTimeout(timeout);
         clearInterval(heartbeatInterval);
@@ -188,7 +188,7 @@ function discoverPeripheral(
       reject(new Error(`Failed to start scanning: ${errMsg(err)}`));
     });
 
-    console.log('[BLE] Scanning for device...');
+    bleLog.info('Scanning for device...');
   });
 }
 
@@ -210,7 +210,7 @@ export async function scanAndRead(opts: ScanOptions): Promise<GarminPayload> {
     );
 
     await connectWithRetries(peripheral, MAX_CONNECT_RETRIES);
-    console.log('[BLE] Connected. Discovering services...');
+    bleLog.info('Connected. Discovering services...');
 
     let matchedAdapter: ScaleAdapter;
 
@@ -221,7 +221,7 @@ export async function scanAndRead(opts: ScanOptions): Promise<GarminPayload> {
       const { services } = await peripheral.discoverAllServicesAndCharacteristicsAsync();
       const serviceUuids = services.map((s) => normalizeUuid(s.uuid));
       const name = peripheral.advertisement?.localName ?? '';
-      debug(`Services: [${serviceUuids.join(', ')}]`);
+      bleLog.debug(`Services: [${serviceUuids.join(', ')}]`);
 
       const info: BleDeviceInfo = { localName: name, serviceUuids };
       const found = adapters.find((a) => a.matches(info));
@@ -235,7 +235,7 @@ export async function scanAndRead(opts: ScanOptions): Promise<GarminPayload> {
       matchedAdapter = found;
     }
 
-    console.log(`[BLE] Matched adapter: ${matchedAdapter.name}`);
+    bleLog.info(`Matched adapter: ${matchedAdapter.name}`);
 
     // Build charMap (re-discover if we already called discoverAll above for adapter matching)
     const charMap = await buildCharMap(peripheral);

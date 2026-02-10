@@ -1,5 +1,6 @@
 import type { ScaleAdapter, UserProfile, ScaleReading } from '../interfaces/scale-adapter.js';
 import type { WeightUnit } from '../validate-env.js';
+import { createLogger } from '../logger.js';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -28,9 +29,7 @@ export interface ScanResult {
 
 // ─── Pure utilities ───────────────────────────────────────────────────────────
 
-export function debug(msg: string): void {
-  if (process.env.DEBUG) console.log(`[BLE:debug] ${msg}`);
-}
+export const bleLog = createLogger('BLE');
 
 /** Normalize a UUID to lowercase 32-char (no dashes) form for comparison. */
 export function normalizeUuid(uuid: string): string {

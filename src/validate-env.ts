@@ -1,7 +1,10 @@
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { config } from 'dotenv';
+import { createLogger } from './logger.js';
 import type { Gender, UserProfile } from './interfaces/scale-adapter.js';
+
+const log = createLogger('Config');
 
 const __dirname: string = dirname(fileURLToPath(import.meta.url));
 const ROOT: string = join(__dirname, '..');
@@ -16,7 +19,7 @@ export interface Config {
 }
 
 function fail(msg: string): never {
-  console.error(`[Config] ${msg}`);
+  log.error(msg);
   process.exit(1);
 }
 

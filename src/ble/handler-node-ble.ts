@@ -4,7 +4,7 @@ import type { ScanOptions, ScanResult } from './types.js';
 import type { BleChar, BleDevice } from './shared.js';
 import { waitForReading } from './shared.js';
 import {
-  debug,
+  bleLog,
   normalizeUuid,
   formatMac,
   sleep,
@@ -30,61 +30,61 @@ async function startDiscoverySafe(btAdapter: Adapter): Promise<boolean> {
   // 1. Normal start
   try {
     await btAdapter.startDiscovery();
-    debug('Discovery started');
+    bleLog.debug('Discovery started');
     return true;
   } catch (e) {
-    debug(`startDiscovery failed: ${errMsg(e)}`);
+    bleLog.debug(`startDiscovery failed: ${errMsg(e)}`);
   }
 
   // Already running (another D-Bus client owns the session)
   if (await btAdapter.isDiscovering()) {
-    debug('Discovery already active (owned by another client), continuing');
+    bleLog.debug('Discovery already active (owned by another client), continuing');
     return true;
   }
 
   // 2. Force-stop via D-Bus (bypass node-ble's isDiscovering guard) + retry
-  debug('Attempting D-Bus StopDiscovery to reset stale state...');
+  bleLog.debug('Attempting D-Bus StopDiscovery to reset stale state...');
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     await (btAdapter as any).helper.callMethod('StopDiscovery');
-    debug('D-Bus StopDiscovery succeeded');
+    bleLog.debug('D-Bus StopDiscovery succeeded');
   } catch (e) {
-    debug(`D-Bus StopDiscovery failed: ${errMsg(e)}`);
+    bleLog.debug(`D-Bus StopDiscovery failed: ${errMsg(e)}`);
   }
   await sleep(1000);
 
   try {
     await btAdapter.startDiscovery();
-    debug('Discovery started after D-Bus reset');
+    bleLog.debug('Discovery started after D-Bus reset');
     return true;
   } catch (e) {
-    debug(`startDiscovery after D-Bus reset failed: ${errMsg(e)}`);
+    bleLog.debug(`startDiscovery after D-Bus reset failed: ${errMsg(e)}`);
   }
 
   // 3. Power-cycle the adapter + retry
-  debug('Attempting adapter power cycle...');
+  bleLog.debug('Attempting adapter power cycle...');
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const helper = (btAdapter as any).helper;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { Variant } = (await import('dbus-next')) as any;
     await helper.set('Powered', new Variant('b', false));
-    debug('Adapter powered off');
+    bleLog.debug('Adapter powered off');
     await sleep(1000);
     await helper.set('Powered', new Variant('b', true));
-    debug('Adapter powered on');
+    bleLog.debug('Adapter powered on');
     await sleep(1000);
 
     await btAdapter.startDiscovery();
-    debug('Discovery started after power cycle');
+    bleLog.debug('Discovery started after power cycle');
     return true;
   } catch (e) {
-    debug(`Power cycle / startDiscovery failed: ${errMsg(e)}`);
+    bleLog.debug(`Power cycle / startDiscovery failed: ${errMsg(e)}`);
   }
 
   // All strategies failed — warn but don't throw
-  console.warn(
-    '[BLE] Warning: Could not start active discovery. ' +
+  bleLog.warn(
+    'Could not start active discovery. ' +
       'Proceeding with passive scanning (device may take longer to appear).',
   );
   return false;
@@ -94,9 +94,9 @@ async function connectWithRetries(device: Device, maxRetries: number): Promise<v
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
       const t0 = Date.now();
-      debug(`Connect attempt ${attempt + 1}/${maxRetries + 1}...`);
+      bleLog.debug(`Connect attempt ${attempt + 1}/${maxRetries + 1}...`);
       await withTimeout(device.connect(), CONNECT_TIMEOUT_MS, 'Connection timed out');
-      debug(`Connected (took ${Date.now() - t0}ms)`);
+      bleLog.debug(`Connected (took ${Date.now() - t0}ms)`);
       return;
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -104,15 +104,15 @@ async function connectWithRetries(device: Device, maxRetries: number): Promise<v
         throw new Error(`Connection failed after ${maxRetries + 1} attempts: ${msg}`);
       }
       const delay = 1000 + attempt * 500;
-      console.log(
-        `[BLE] Connect error: ${msg}. Retrying (${attempt + 1}/${maxRetries}) in ${delay}ms...`,
+      bleLog.warn(
+        `Connect error: ${msg}. Retrying (${attempt + 1}/${maxRetries}) in ${delay}ms...`,
       );
       try {
-        debug('Disconnecting before retry...');
+        bleLog.debug('Disconnecting before retry...');
         await device.disconnect();
-        debug('Disconnect OK');
+        bleLog.debug('Disconnect OK');
       } catch {
-        debug('Disconnect failed (ignored)');
+        bleLog.debug('Disconnect failed (ignored)');
       }
       await sleep(delay);
     }
@@ -139,14 +139,14 @@ async function autoDiscover(
         const name = await dev.getName().catch(() => '');
         if (!name) continue;
 
-        debug(`Discovered: ${name} [${addr}]`);
+        bleLog.debug(`Discovered: ${name} [${addr}]`);
 
         // Try matching with name only (serviceUuids not available pre-connect on D-Bus).
         // Adapters that require serviceUuids will fail to match here and need SCALE_MAC.
         const info: BleDeviceInfo = { localName: name, serviceUuids: [] };
         const matched = adapters.find((a) => a.matches(info));
         if (matched) {
-          console.log(`[BLE] Auto-discovered: ${matched.name} (${name} [${addr}])`);
+          bleLog.info(`Auto-discovered: ${matched.name} (${name} [${addr}])`);
           return { device: dev, adapter: matched };
         }
       } catch {
@@ -156,7 +156,7 @@ async function autoDiscover(
 
     heartbeat++;
     if (heartbeat % 5 === 0) {
-      console.log('[BLE] Still scanning...');
+      bleLog.info('Still scanning...');
     }
     await sleep(DISCOVERY_POLL_MS);
   }
@@ -201,7 +201,7 @@ async function buildCharMap(gatt: NodeBle.GattServer): Promise<Map<string, BleCh
     try {
       const service = await gatt.getPrimaryService(svcUuid);
       const charUuids = await service.characteristics();
-      debug(`  Service ${svcUuid}: chars=[${charUuids.join(', ')}]`);
+      bleLog.debug(`  Service ${svcUuid}: chars=[${charUuids.join(', ')}]`);
 
       for (const charUuid of charUuids) {
         const char = await service.getCharacteristic(charUuid);
@@ -209,7 +209,7 @@ async function buildCharMap(gatt: NodeBle.GattServer): Promise<Map<string, BleCh
       }
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
-      debug(`  Service ${svcUuid}: error=${msg}`);
+      bleLog.debug(`  Service ${svcUuid}: error=${msg}`);
     }
   }
 
@@ -243,7 +243,7 @@ export async function scanAndRead(opts: ScanOptions): Promise<GarminPayload> {
 
     if (targetMac) {
       const mac = formatMac(targetMac);
-      console.log('[BLE] Scanning for device...');
+      bleLog.info('Scanning for device...');
 
       device = await withTimeout(
         btAdapter.waitDevice(mac),
@@ -252,25 +252,25 @@ export async function scanAndRead(opts: ScanOptions): Promise<GarminPayload> {
       );
 
       const name = await device.getName().catch(() => '');
-      debug(`Found device: ${name} [${mac}]`);
+      bleLog.debug(`Found device: ${name} [${mac}]`);
 
       // Stop discovery before connecting — BlueZ on low-power devices (e.g. Pi Zero)
       // often fails with le-connection-abort-by-local while discovery is still active.
       try {
-        debug('Stopping discovery before connect...');
+        bleLog.debug('Stopping discovery before connect...');
         await btAdapter.stopDiscovery();
-        debug('Discovery stopped');
+        bleLog.debug('Discovery stopped');
       } catch {
-        debug('stopDiscovery failed (may already be stopped)');
+        bleLog.debug('stopDiscovery failed (may already be stopped)');
       }
 
       await connectWithRetries(device, MAX_CONNECT_RETRIES);
-      console.log('[BLE] Connected. Discovering services...');
+      bleLog.info('Connected. Discovering services...');
 
       // Match adapter using device name + GATT service UUIDs (post-connect)
       const gatt = await device.gatt();
       const serviceUuids = await gatt.services();
-      debug(`Services: [${serviceUuids.join(', ')}]`);
+      bleLog.debug(`Services: [${serviceUuids.join(', ')}]`);
 
       const info: BleDeviceInfo = {
         localName: name,
@@ -285,7 +285,7 @@ export async function scanAndRead(opts: ScanOptions): Promise<GarminPayload> {
         );
       }
       matchedAdapter = found;
-      console.log(`[BLE] Matched adapter: ${matchedAdapter.name}`);
+      bleLog.info(`Matched adapter: ${matchedAdapter.name}`);
     } else {
       // Auto-discovery: poll discovered devices, match by name, connect, verify
       const result = await autoDiscover(btAdapter, adapters);
@@ -295,15 +295,15 @@ export async function scanAndRead(opts: ScanOptions): Promise<GarminPayload> {
       // Stop discovery before connecting — BlueZ on low-power devices (e.g. Pi Zero)
       // often fails with le-connection-abort-by-local while discovery is still active.
       try {
-        debug('Stopping discovery before connect...');
+        bleLog.debug('Stopping discovery before connect...');
         await btAdapter.stopDiscovery();
-        debug('Discovery stopped');
+        bleLog.debug('Discovery stopped');
       } catch {
-        debug('stopDiscovery failed (may already be stopped)');
+        bleLog.debug('stopDiscovery failed (may already be stopped)');
       }
 
       await connectWithRetries(device, MAX_CONNECT_RETRIES);
-      console.log('[BLE] Connected. Discovering services...');
+      bleLog.info('Connected. Discovering services...');
     }
 
     // Setup GATT characteristics and wait for a complete reading

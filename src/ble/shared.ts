@@ -6,7 +6,7 @@ import type {
   ConnectionContext,
 } from '../interfaces/scale-adapter.js';
 import type { WeightUnit } from '../validate-env.js';
-import { LBS_TO_KG, normalizeUuid, debug } from './types.js';
+import { LBS_TO_KG, normalizeUuid, bleLog } from './types.js';
 
 // ─── Thin abstractions over BLE library objects ───────────────────────────────
 
@@ -106,9 +106,9 @@ export function waitForReading(
             await subscribeAndListen(charUuid);
           },
         };
-        debug('Calling adapter.onConnected()');
+        bleLog.debug('Calling adapter.onConnected()');
         await adapter.onConnected(ctx);
-        debug('adapter.onConnected() completed');
+        bleLog.debug('adapter.onConnected() completed');
       } else {
         // Legacy unlock command interval
         const writeChar =
@@ -123,7 +123,7 @@ export function waitForReading(
             await writeChar.write(unlockBuf, false);
           } catch (e: unknown) {
             const msg = e instanceof Error ? e.message : String(e);
-            if (!resolved) console.error(`[BLE] Unlock write error: ${msg}`);
+            if (!resolved) bleLog.error(`Unlock write error: ${msg}`);
           }
         };
 
@@ -137,7 +137,7 @@ export function waitForReading(
       try {
         if (adapter.characteristics) {
           // Multi-char mode
-          debug(`Multi-char mode: ${adapter.characteristics.length} bindings`);
+          bleLog.debug(`Multi-char mode: ${adapter.characteristics.length} bindings`);
           const notifyBindings = adapter.characteristics.filter((b) => b.type === 'notify');
 
           if (notifyBindings.length === 0) {
@@ -149,12 +149,10 @@ export function waitForReading(
           for (const binding of notifyBindings) {
             await subscribeAndListen(binding.uuid);
           }
-          console.log(
-            `[BLE] Subscribed to ${notifyBindings.length} notification(s). Step on the scale.`,
-          );
+          bleLog.info(`Subscribed to ${notifyBindings.length} notification(s). Step on the scale.`);
         } else {
           // Legacy mode — single notify + write pair
-          debug(
+          bleLog.debug(
             `Looking for notify=${adapter.charNotifyUuid}` +
               (adapter.altCharNotifyUuid ? ` (alt=${adapter.altCharNotifyUuid})` : '') +
               `, write=${adapter.charWriteUuid}` +
@@ -181,7 +179,7 @@ export function waitForReading(
             ? adapter.charNotifyUuid
             : adapter.altCharNotifyUuid!;
           await subscribeAndListen(effectiveNotifyUuid);
-          console.log('[BLE] Subscribed to notifications. Step on the scale.');
+          bleLog.info('Subscribed to notifications. Step on the scale.');
         }
 
         await startInit();
