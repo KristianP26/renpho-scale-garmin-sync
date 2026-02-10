@@ -22,11 +22,12 @@ async function main(): Promise<void> {
     } catch {
       if (!(await adapter.isDiscovering())) {
         try {
-          await adapter.stopDiscovery();
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          await (adapter as any).helper.callMethod('StopDiscovery');
         } catch {
           /* ignore */
         }
-        await new Promise((r) => setTimeout(r, 500));
+        await new Promise((r) => setTimeout(r, 1000));
         await adapter.startDiscovery();
       }
     }

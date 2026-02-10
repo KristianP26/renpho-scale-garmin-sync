@@ -71,20 +71,24 @@ export async function scanAndRead(opts: ScanOptions): Promise<GarminPayload> {
     }
 
     // Start discovery — BlueZ may be in a stale/transitional state from a
-    // previous crashed run. If the first attempt fails, reset and retry.
+    // previous crashed run where Discovering=false but StartDiscovery still
+    // rejects. node-ble's stopDiscovery() has a client-side guard that skips
+    // the D-Bus call when isDiscovering()=false, so we call StopDiscovery
+    // directly on the D-Bus interface to force a clean reset.
     try {
       await btAdapter.startDiscovery();
     } catch {
       if (await btAdapter.isDiscovering()) {
         debug('Discovery already active, continuing');
       } else {
-        debug('startDiscovery failed, resetting...');
+        debug('startDiscovery failed, force-stopping via D-Bus...');
         try {
-          await btAdapter.stopDiscovery();
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          await (btAdapter as any).helper.callMethod('StopDiscovery');
         } catch {
-          /* ignore */
+          /* ignore — BlueZ may reject if truly not discovering */
         }
-        await sleep(500);
+        await sleep(1000);
         await btAdapter.startDiscovery();
       }
     }
