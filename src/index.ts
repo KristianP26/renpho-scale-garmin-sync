@@ -163,18 +163,15 @@ async function main(): Promise<void> {
   while (!signal.aborted) {
     try {
       await runCycle(exporters);
-    } catch (err) {
+
+      // Cooldown only after a successful reading — the discovery timeout
+      // (120s) already acts as the waiting period between retry attempts
       if (signal.aborted) break;
-      log.error(`Cycle error: ${err instanceof Error ? err.message : err}`);
-    }
-
-    if (signal.aborted) break;
-
-    log.info(`\nWaiting ${scanCooldownSec}s before next scan...`);
-    try {
+      log.info(`\nWaiting ${scanCooldownSec}s before next scan...`);
       await abortableSleep(scanCooldownSec * 1000, signal);
     } catch {
-      break; // Aborted during cooldown
+      if (signal.aborted) break;
+      log.info('No scale found, retrying...');
     }
   }
 
