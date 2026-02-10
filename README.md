@@ -43,7 +43,7 @@ Works on **Linux** (including Raspberry Pi), **macOS**, and **Windows**.
 └────────────────┘        └────────────────┘        └────────────────┘
 ```
 
-**TypeScript** (run via `tsx`) scans for a BLE scale, auto-detects the brand via the adapter pattern, and calculates up to 10 body composition metrics. It passes the results as JSON to a **Python** script that uploads to Garmin Connect and returns a structured JSON response.
+**TypeScript** (run via `tsx`) scans for a BLE scale using the OS-appropriate handler (node-ble on Linux, noble on Windows/macOS), auto-detects the brand via the adapter pattern, and calculates up to 10 body composition metrics. It passes the results as JSON to a **Python** script that uploads to Garmin Connect and returns a structured JSON response.
 
 ## Prerequisites
 
@@ -154,7 +154,7 @@ All environment variables are validated at startup with clear error messages:
 | `USER_IS_ATHLETE` | Yes      | `true`/`false`/`yes`/`no`/`1`/`0`                    |
 | `WEIGHT_UNIT`     | No       | `kg` or `lbs` (default: `kg`) — display + scale input |
 | `HEIGHT_UNIT`     | No       | `cm` or `in` (default: `cm`) — for `USER_HEIGHT`    |
-| `SCALE_MAC`       | No       | Format `XX:XX:XX:XX:XX:XX` if provided               |
+| `SCALE_MAC`       | No       | MAC (`XX:XX:XX:XX:XX:XX`) or CoreBluetooth UUID (macOS) |
 | `DRY_RUN`         | No       | `true` to skip Garmin upload (read scale + compute only) |
 
 ### 2. Find your scale's MAC address (optional)
@@ -167,7 +167,7 @@ npm run scan
 
 This scans for nearby BLE devices for 15 seconds. Recognized scales are tagged with the adapter name (e.g. `[QN Scale]`, `[Xiaomi Mi Scale 2]`, `[Yunmai]`). Copy the MAC address into your `.env` file.
 
-> **Tip:** On macOS, noble uses UUIDs instead of MAC addresses. The scan output will show the correct identifier to use.
+> **Tip:** On macOS, BLE peripherals are identified by a CoreBluetooth UUID instead of a MAC address. The `npm run scan` output shows the correct identifier to use for `SCALE_MAC`.
 
 ### 3. Authenticate with Garmin Connect
 
@@ -267,7 +267,12 @@ The project uses [ESLint](https://eslint.org/) with [typescript-eslint](https://
 blescalesync/
 ├── src/
 │   ├── index.ts                    # Main orchestrator
-│   ├── ble.ts                      # Generic BLE manager
+│   ├── ble/
+│   │   ├── index.ts                # OS detection + dynamic import barrel
+│   │   ├── types.ts                # ScanOptions, ScanResult, constants, utilities
+│   │   ├── shared.ts               # BleChar/BleDevice abstractions, waitForReading()
+│   │   ├── handler-node-ble.ts     # Linux: node-ble (BlueZ D-Bus)
+│   │   └── handler-noble.ts        # Windows/macOS: @abandonware/noble
 │   ├── calculator.ts               # Body composition math (BIA formulas)
 │   ├── validate-env.ts             # .env validation & typed config loader
 │   ├── scan.ts                     # BLE device scanner utility

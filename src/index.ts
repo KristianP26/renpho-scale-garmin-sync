@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { spawn } from 'node:child_process';
 
-import { scanAndRead } from './ble.js';
+import { scanAndRead } from './ble/index.js';
 import { adapters } from './scales/index.js';
 import { loadConfig } from './validate-env.js';
 import type { GarminPayload } from './interfaces/scale-adapter.js';

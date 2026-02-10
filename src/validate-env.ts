@@ -53,6 +53,9 @@ function parseBoolean(key: string, raw: string): boolean {
 }
 
 const MAC_REGEX = /^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$/;
+/** CoreBluetooth UUID format used on macOS (e.g. 12345678-1234-1234-1234-123456789ABC). */
+const CB_UUID_REGEX =
+  /^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$/;
 
 export function loadConfig(): Config {
   config({ path: join(ROOT, '.env') });
@@ -89,8 +92,11 @@ export function loadConfig(): Config {
   let scaleMac: string | undefined;
   const rawMac = process.env.SCALE_MAC;
   if (rawMac) {
-    if (!MAC_REGEX.test(rawMac)) {
-      fail(`SCALE_MAC must be in format XX:XX:XX:XX:XX:XX, got '${rawMac}'`);
+    if (!MAC_REGEX.test(rawMac) && !CB_UUID_REGEX.test(rawMac)) {
+      fail(
+        `SCALE_MAC must be a MAC address (XX:XX:XX:XX:XX:XX) ` +
+          `or CoreBluetooth UUID (macOS), got '${rawMac}'`,
+      );
     }
     scaleMac = rawMac;
   }
