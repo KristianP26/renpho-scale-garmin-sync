@@ -62,7 +62,7 @@ async function main(): Promise<void> {
     },
   });
 
-  log.info(`\n\nMeasurement received: ${fmtWeight(payload.weight)} / ${payload.impedance} Ohm`);
+  log.info(`\nMeasurement received: ${fmtWeight(payload.weight)} / ${payload.impedance} Ohm`);
   log.info('Body composition:');
   const kgMetrics = new Set(['boneMass', 'muscleMass']);
   const { weight: _w, impedance: _i, ...metrics } = payload;

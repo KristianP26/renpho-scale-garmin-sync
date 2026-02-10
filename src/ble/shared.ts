@@ -72,6 +72,8 @@ export function waitForReading(
       if (adapter.isComplete(reading)) {
         resolved = true;
         cleanup();
+        // Clear any \r progress line before logging
+        process.stdout.write('\r' + ' '.repeat(80) + '\r');
         bleLog.info(`Reading complete: ${reading.weight.toFixed(2)} kg / ${reading.impedance} Ohm`);
         try {
           resolve(adapter.computeMetrics(reading, profile));
@@ -151,6 +153,7 @@ export function waitForReading(
             await subscribeAndListen(binding.uuid);
           }
           bleLog.info(`Subscribed to ${notifyBindings.length} notification(s). Step on the scale.`);
+          await startInit();
         } else {
           // Legacy mode — single notify + write pair
           bleLog.debug(
@@ -179,11 +182,11 @@ export function waitForReading(
           const effectiveNotifyUuid = resolveChar(adapter.charNotifyUuid)
             ? adapter.charNotifyUuid
             : adapter.altCharNotifyUuid!;
-          await subscribeAndListen(effectiveNotifyUuid);
+          // Legacy mode — subscribe + first unlock in parallel to prevent
+          // the scale from disconnecting before receiving the unlock command
+          await Promise.all([subscribeAndListen(effectiveNotifyUuid), startInit()]);
           bleLog.info('Subscribed to notifications. Step on the scale.');
         }
-
-        await startInit();
       } catch (e) {
         if (!resolved) {
           cleanup();
