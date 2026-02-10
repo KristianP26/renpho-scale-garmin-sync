@@ -25,6 +25,21 @@ export class NtfyExporter implements Exporter {
     this.config = config;
   }
 
+  async healthcheck(): Promise<ExportResult> {
+    try {
+      const healthUrl = `${this.config.url.replace(/\/+$/, '')}/v1/health`;
+      const response = await fetch(healthUrl, {
+        signal: AbortSignal.timeout(5000),
+      });
+      if (!response.ok) {
+        return { success: false, error: `HTTP ${response.status}` };
+      }
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  }
+
   async export(data: BodyComposition): Promise<ExportResult> {
     const { url, topic, title, priority, token, username, password } = this.config;
     const targetUrl = `${url.replace(/\/+$/, '')}/${topic}`;

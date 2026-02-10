@@ -9,4 +9,5 @@ export interface ExportResult {
 export interface Exporter {
   readonly name: string;
   export(data: BodyComposition): Promise<ExportResult>;
+  healthcheck?(): Promise<ExportResult>;
 }

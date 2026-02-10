@@ -15,6 +15,21 @@ export class WebhookExporter implements Exporter {
     this.config = config;
   }
 
+  async healthcheck(): Promise<ExportResult> {
+    try {
+      const response = await fetch(this.config.url, {
+        method: 'HEAD',
+        signal: AbortSignal.timeout(5000),
+      });
+      if (!response.ok) {
+        return { success: false, error: `HTTP ${response.status}` };
+      }
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  }
+
   async export(data: BodyComposition): Promise<ExportResult> {
     const { url, method, headers, timeout } = this.config;
     let lastError: string | undefined;

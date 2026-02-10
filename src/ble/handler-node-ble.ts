@@ -122,12 +122,16 @@ async function connectWithRetries(device: Device, maxRetries: number): Promise<v
 async function autoDiscover(
   btAdapter: Adapter,
   adapters: ScaleAdapter[],
+  abortSignal?: AbortSignal,
 ): Promise<{ device: Device; adapter: ScaleAdapter }> {
   const deadline = Date.now() + DISCOVERY_TIMEOUT_MS;
   const checked = new Set<string>();
   let heartbeat = 0;
 
   while (Date.now() < deadline) {
+    if (abortSignal?.aborted) {
+      throw abortSignal.reason ?? new DOMException('Aborted', 'AbortError');
+    }
     const addresses: string[] = await btAdapter.devices();
 
     for (const addr of addresses) {
@@ -223,7 +227,7 @@ async function buildCharMap(gatt: NodeBle.GattServer): Promise<Map<string, BleCh
  * Uses node-ble (BlueZ D-Bus) — requires bluetoothd running on Linux.
  */
 export async function scanAndRead(opts: ScanOptions): Promise<BodyComposition> {
-  const { targetMac, adapters, profile, weightUnit, onLiveData } = opts;
+  const { targetMac, adapters, profile, weightUnit, onLiveData, abortSignal } = opts;
   const { bluetooth, destroy } = NodeBle.createBluetooth();
   let device: Device | null = null;
 
@@ -245,11 +249,25 @@ export async function scanAndRead(opts: ScanOptions): Promise<BodyComposition> {
       const mac = formatMac(targetMac);
       bleLog.info('Scanning for device...');
 
-      device = await withTimeout(
+      if (abortSignal?.aborted) {
+        throw abortSignal.reason ?? new DOMException('Aborted', 'AbortError');
+      }
+
+      const abortPromise = abortSignal
+        ? new Promise<never>((_resolve, reject) => {
+            const onAbort = () =>
+              reject(abortSignal.reason ?? new DOMException('Aborted', 'AbortError'));
+            abortSignal.addEventListener('abort', onAbort, { once: true });
+          })
+        : null;
+
+      const waitPromise = withTimeout(
         btAdapter.waitDevice(mac),
         DISCOVERY_TIMEOUT_MS,
         `Device ${mac} not found within ${DISCOVERY_TIMEOUT_MS / 1000}s`,
       );
+
+      device = abortPromise ? await Promise.race([waitPromise, abortPromise]) : await waitPromise;
 
       const name = await device.getName().catch(() => '');
       bleLog.debug(`Found device: ${name} [${mac}]`);
@@ -288,7 +306,7 @@ export async function scanAndRead(opts: ScanOptions): Promise<BodyComposition> {
       bleLog.info(`Matched adapter: ${matchedAdapter.name}`);
     } else {
       // Auto-discovery: poll discovered devices, match by name, connect, verify
-      const result = await autoDiscover(btAdapter, adapters);
+      const result = await autoDiscover(btAdapter, adapters, abortSignal);
       device = result.device;
       matchedAdapter = result.adapter;
 

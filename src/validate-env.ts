@@ -16,6 +16,8 @@ export interface Config {
   scaleMac?: string;
   weightUnit: WeightUnit;
   dryRun: boolean;
+  continuousMode: boolean;
+  scanCooldownSec: number;
 }
 
 function fail(msg: string): never {
@@ -99,12 +101,20 @@ export function loadConfig(): Config {
   }
 
   const dryRun = process.env.DRY_RUN ? parseBoolean('DRY_RUN', process.env.DRY_RUN) : false;
+  const continuousMode = process.env.CONTINUOUS_MODE
+    ? parseBoolean('CONTINUOUS_MODE', process.env.CONTINUOUS_MODE)
+    : false;
+  const scanCooldownSec = process.env.SCAN_COOLDOWN
+    ? parseNumber('SCAN_COOLDOWN', process.env.SCAN_COOLDOWN, 5, 3600)
+    : 30;
 
   return {
     profile: { height, age, gender, isAthlete },
     scaleMac,
     weightUnit,
     dryRun,
+    continuousMode,
+    scanCooldownSec,
   };
 }
 

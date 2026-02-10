@@ -160,6 +160,64 @@ describe('loadConfig()', () => {
     });
   });
 
+  describe('CONTINUOUS_MODE', () => {
+    it('defaults to false when not set', () => {
+      setEnv();
+      const cfg = loadConfig();
+      expect(cfg.continuousMode).toBe(false);
+    });
+
+    it('accepts true', () => {
+      setEnv({ CONTINUOUS_MODE: 'true' });
+      const cfg = loadConfig();
+      expect(cfg.continuousMode).toBe(true);
+    });
+
+    it('accepts false', () => {
+      setEnv({ CONTINUOUS_MODE: 'false' });
+      const cfg = loadConfig();
+      expect(cfg.continuousMode).toBe(false);
+    });
+
+    it('rejects invalid value', () => {
+      setEnv({ CONTINUOUS_MODE: 'maybe' });
+      expect(() => loadConfig()).toThrow();
+      expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('true/false/yes/no/1/0'));
+    });
+  });
+
+  describe('SCAN_COOLDOWN', () => {
+    it('defaults to 30 when not set', () => {
+      setEnv();
+      const cfg = loadConfig();
+      expect(cfg.scanCooldownSec).toBe(30);
+    });
+
+    it('accepts valid value in range', () => {
+      setEnv({ SCAN_COOLDOWN: '60' });
+      const cfg = loadConfig();
+      expect(cfg.scanCooldownSec).toBe(60);
+    });
+
+    it('rejects value below 5', () => {
+      setEnv({ SCAN_COOLDOWN: '2' });
+      expect(() => loadConfig()).toThrow();
+      expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('between 5 and 3600'));
+    });
+
+    it('rejects value above 3600', () => {
+      setEnv({ SCAN_COOLDOWN: '5000' });
+      expect(() => loadConfig()).toThrow();
+      expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('between 5 and 3600'));
+    });
+
+    it('rejects non-number', () => {
+      setEnv({ SCAN_COOLDOWN: 'abc' });
+      expect(() => loadConfig()).toThrow();
+      expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('must be a number'));
+    });
+  });
+
   describe('missing required vars', () => {
     it('exits when USER_HEIGHT is missing', () => {
       setEnv();

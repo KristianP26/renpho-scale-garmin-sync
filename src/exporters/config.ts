@@ -15,6 +15,7 @@ export interface MqttConfig {
   password?: string;
   clientId: string;
   haDiscovery: boolean;
+  haDeviceName: string;
 }
 
 export interface WebhookConfig {
@@ -126,6 +127,7 @@ export function loadExporterConfig(): ExporterConfig {
       password: process.env.MQTT_PASSWORD?.trim() || undefined,
       clientId: process.env.MQTT_CLIENT_ID?.trim() || 'ble-scale-sync',
       haDiscovery: parseBoolean('MQTT_HA_DISCOVERY', process.env.MQTT_HA_DISCOVERY?.trim(), true),
+      haDeviceName: process.env.MQTT_HA_DEVICE_NAME?.trim() || 'BLE Scale',
     };
   }
 

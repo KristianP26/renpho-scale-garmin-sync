@@ -91,6 +91,7 @@ describe('loadExporterConfig()', () => {
         password: undefined,
         clientId: 'ble-scale-sync',
         haDiscovery: true,
+        haDeviceName: 'BLE Scale',
       });
     });
 
@@ -114,6 +115,7 @@ describe('loadExporterConfig()', () => {
         password: 'pass',
         clientId: 'my-scale',
         haDiscovery: false,
+        haDeviceName: 'BLE Scale',
       });
     });
 
@@ -133,6 +135,14 @@ describe('loadExporterConfig()', () => {
       expect(errorSpy).toHaveBeenCalledWith(
         expect.stringContaining('MQTT_RETAIN must be true/false'),
       );
+    });
+
+    it('parses custom MQTT_HA_DEVICE_NAME', () => {
+      vi.stubEnv('EXPORTERS', 'mqtt');
+      vi.stubEnv('MQTT_BROKER_URL', 'mqtt://broker.local:1883');
+      vi.stubEnv('MQTT_HA_DEVICE_NAME', 'My Custom Scale');
+      const cfg = loadExporterConfig();
+      expect(cfg.mqtt!.haDeviceName).toBe('My Custom Scale');
     });
 
     it('does not parse MQTT config when mqtt is not enabled', () => {

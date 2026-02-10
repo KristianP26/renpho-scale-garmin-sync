@@ -19,6 +19,7 @@ export interface ScanOptions {
   profile: UserProfile;
   weightUnit?: WeightUnit;
   onLiveData?: (reading: ScaleReading) => void;
+  abortSignal?: AbortSignal;
 }
 
 export interface ScanResult {
@@ -52,6 +53,23 @@ export function sleep(ms: number): Promise<void> {
 
 export function errMsg(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+export function abortableSleep(ms: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted)
+    return Promise.reject(signal.reason ?? new DOMException('Aborted', 'AbortError'));
+  if (!signal) return sleep(ms);
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      signal.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(signal.reason ?? new DOMException('Aborted', 'AbortError'));
+    };
+    signal.addEventListener('abort', onAbort, { once: true });
+  });
 }
 
 export async function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {

@@ -4,15 +4,24 @@
 import './env.js';
 
 import { scanAndRead } from './ble/index.js';
+import { abortableSleep } from './ble/types.js';
 import { adapters } from './scales/index.js';
 import { loadConfig } from './validate-env.js';
 import { createLogger } from './logger.js';
 import { loadExporterConfig, createExporters } from './exporters/index.js';
+import type { Exporter } from './interfaces/exporter.js';
 import type { BodyComposition } from './interfaces/scale-adapter.js';
 
 const log = createLogger('Sync');
 
-const { profile, scaleMac: SCALE_MAC, weightUnit, dryRun } = loadConfig();
+const {
+  profile,
+  scaleMac: SCALE_MAC,
+  weightUnit,
+  dryRun,
+  continuousMode,
+  scanCooldownSec,
+} = loadConfig();
 
 const KG_TO_LBS = 2.20462;
 
@@ -21,20 +30,62 @@ function fmtWeight(kg: number): string {
   return `${kg.toFixed(2)} kg`;
 }
 
-async function main(): Promise<void> {
-  log.info(`\nBLE Scale Sync${dryRun ? ' (dry run)' : ''}`);
-  if (SCALE_MAC) {
-    log.info(`Scanning for scale ${SCALE_MAC}...`);
-  } else {
-    log.info(`Scanning for any recognized scale...`);
-  }
-  log.info(`Adapters: ${adapters.map((a) => a.name).join(', ')}\n`);
+// ─── Abort / signal handling ─────────────────────────────────────────────────
 
+const ac = new AbortController();
+const { signal } = ac;
+let forceExitOnNext = false;
+
+function onSignal(): void {
+  if (forceExitOnNext) {
+    log.info('Force exit.');
+    process.exit(1);
+  }
+  forceExitOnNext = true;
+  log.info('\nShutting down gracefully... (press again to force exit)');
+  ac.abort();
+}
+
+process.on('SIGINT', onSignal);
+process.on('SIGTERM', onSignal);
+
+// ─── Healthcheck runner ──────────────────────────────────────────────────────
+
+async function runHealthchecks(exporters: Exporter[]): Promise<void> {
+  const withHealthcheck = exporters.filter(
+    (e): e is Exporter & { healthcheck: NonNullable<Exporter['healthcheck']> } =>
+      typeof e.healthcheck === 'function',
+  );
+
+  if (withHealthcheck.length === 0) return;
+
+  log.info('Running exporter healthchecks...');
+  const results = await Promise.allSettled(withHealthcheck.map((e) => e.healthcheck()));
+
+  for (let i = 0; i < results.length; i++) {
+    const result = results[i];
+    const name = withHealthcheck[i].name;
+    if (result.status === 'fulfilled' && result.value.success) {
+      log.info(`  ${name}: OK`);
+    } else if (result.status === 'fulfilled') {
+      log.warn(`  ${name}: ${result.value.error}`);
+    } else {
+      log.warn(
+        `  ${name}: ${result.reason instanceof Error ? result.reason.message : result.reason}`,
+      );
+    }
+  }
+}
+
+// ─── Single cycle ────────────────────────────────────────────────────────────
+
+async function runCycle(exporters?: Exporter[]): Promise<boolean> {
   const payload: BodyComposition = await scanAndRead({
     targetMac: SCALE_MAC,
     adapters,
     profile,
     weightUnit,
+    abortSignal: signal,
     onLiveData(reading) {
       const impStr: string = reading.impedance > 0 ? `${reading.impedance} Ohm` : 'Measuring...';
       process.stdout.write(`\r  Weight: ${fmtWeight(reading.weight)} | Impedance: ${impStr}      `);
@@ -50,13 +101,11 @@ async function main(): Promise<void> {
     log.info(`  ${k}: ${display}`);
   }
 
-  if (dryRun) {
+  if (!exporters) {
     log.info('\nDry run — skipping export.');
-    return;
+    return true;
   }
 
-  const exporterConfig = loadExporterConfig();
-  const exporters = createExporters(exporterConfig);
   log.info(`\nExporting to: ${exporters.map((e) => e.name).join(', ')}...`);
 
   const results = await Promise.allSettled(exporters.map((e) => e.export(payload)));
@@ -78,13 +127,65 @@ async function main(): Promise<void> {
 
   if (allFailed) {
     log.error('All exports failed.');
-    process.exit(1);
+    return false;
   }
 
   log.info('Done.');
+  return true;
+}
+
+// ─── Main ────────────────────────────────────────────────────────────────────
+
+async function main(): Promise<void> {
+  const modeLabel = continuousMode ? ' (continuous)' : '';
+  log.info(`\nBLE Scale Sync${dryRun ? ' (dry run)' : ''}${modeLabel}`);
+  if (SCALE_MAC) {
+    log.info(`Scanning for scale ${SCALE_MAC}...`);
+  } else {
+    log.info(`Scanning for any recognized scale...`);
+  }
+  log.info(`Adapters: ${adapters.map((a) => a.name).join(', ')}\n`);
+
+  let exporters: Exporter[] | undefined;
+  if (!dryRun) {
+    const exporterConfig = loadExporterConfig();
+    exporters = createExporters(exporterConfig);
+    await runHealthchecks(exporters);
+  }
+
+  if (!continuousMode) {
+    const success = await runCycle(exporters);
+    if (!success) process.exit(1);
+    return;
+  }
+
+  // Continuous mode loop
+  while (!signal.aborted) {
+    try {
+      await runCycle(exporters);
+    } catch (err) {
+      if (signal.aborted) break;
+      log.error(`Cycle error: ${err instanceof Error ? err.message : err}`);
+    }
+
+    if (signal.aborted) break;
+
+    log.info(`\nWaiting ${scanCooldownSec}s before next scan...`);
+    try {
+      await abortableSleep(scanCooldownSec * 1000, signal);
+    } catch {
+      break; // Aborted during cooldown
+    }
+  }
+
+  log.info('Stopped.');
 }
 
 main().catch((err: Error) => {
+  if (signal.aborted) {
+    log.info('Stopped.');
+    return;
+  }
   log.error(err.message);
   process.exit(1);
 });

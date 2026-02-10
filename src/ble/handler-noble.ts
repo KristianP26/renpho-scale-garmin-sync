@@ -126,11 +126,15 @@ async function buildCharMap(peripheral: Peripheral): Promise<Map<string, BleChar
 function discoverPeripheral(
   adapters: ScaleAdapter[],
   targetMac?: string,
+  abortSignal?: AbortSignal,
 ): Promise<{ peripheral: Peripheral; matchedAdapter?: ScaleAdapter }> {
+  if (abortSignal?.aborted) {
+    return Promise.reject(abortSignal.reason ?? new DOMException('Aborted', 'AbortError'));
+  }
+
   return new Promise((resolve, reject) => {
     const timeout = setTimeout(() => {
-      noble.removeAllListeners('discover');
-      noble.stopScanningAsync().catch(() => {});
+      cleanup();
       reject(new Error(`No device found within ${DISCOVERY_TIMEOUT_MS / 1000}s`));
     }, DISCOVERY_TIMEOUT_MS);
 
@@ -141,6 +145,21 @@ function discoverPeripheral(
         bleLog.info('Still scanning...');
       }
     }, DISCOVERY_POLL_MS);
+
+    const cleanup = () => {
+      clearTimeout(timeout);
+      clearInterval(heartbeatInterval);
+      noble.removeListener('discover', onDiscover);
+      noble.stopScanningAsync().catch(() => {});
+      abortSignal?.removeEventListener('abort', onAbort);
+    };
+
+    const onAbort = () => {
+      cleanup();
+      reject(abortSignal!.reason ?? new DOMException('Aborted', 'AbortError'));
+    };
+
+    abortSignal?.addEventListener('abort', onAbort, { once: true });
 
     const onDiscover = (peripheral: Peripheral): void => {
       const name = peripheral.advertisement?.localName ?? '';
@@ -154,10 +173,7 @@ function discoverPeripheral(
         if (!matchesTarget(peripheral, targetMac)) return;
         bleLog.debug(`Target device matched: ${name} [${addr}]`);
 
-        clearTimeout(timeout);
-        clearInterval(heartbeatInterval);
-        noble.removeListener('discover', onDiscover);
-        noble.stopScanningAsync().catch(() => {});
+        cleanup();
 
         // Adapter matching will happen post-connect (when all services are known)
         resolve({ peripheral });
@@ -169,10 +185,7 @@ function discoverPeripheral(
 
         bleLog.info(`Auto-discovered: ${matched.name} (${name} [${addr}])`);
 
-        clearTimeout(timeout);
-        clearInterval(heartbeatInterval);
-        noble.removeListener('discover', onDiscover);
-        noble.stopScanningAsync().catch(() => {});
+        cleanup();
 
         resolve({ peripheral, matchedAdapter: matched });
       }
@@ -182,9 +195,7 @@ function discoverPeripheral(
 
     // allowDuplicates=true so we keep receiving advertisements
     noble.startScanningAsync([], true).catch((err) => {
-      clearTimeout(timeout);
-      clearInterval(heartbeatInterval);
-      noble.removeListener('discover', onDiscover);
+      cleanup();
       reject(new Error(`Failed to start scanning: ${errMsg(err)}`));
     });
 
@@ -199,7 +210,7 @@ function discoverPeripheral(
  * Uses noble — works on Windows and macOS.
  */
 export async function scanAndRead(opts: ScanOptions): Promise<BodyComposition> {
-  const { targetMac, adapters, profile, weightUnit, onLiveData } = opts;
+  const { targetMac, adapters, profile, weightUnit, onLiveData, abortSignal } = opts;
 
   try {
     await waitForPoweredOn();
@@ -207,6 +218,7 @@ export async function scanAndRead(opts: ScanOptions): Promise<BodyComposition> {
     const { peripheral, matchedAdapter: discoveredAdapter } = await discoverPeripheral(
       adapters,
       targetMac,
+      abortSignal,
     );
 
     await connectWithRetries(peripheral, MAX_CONNECT_RETRIES);

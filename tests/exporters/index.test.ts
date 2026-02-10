@@ -25,6 +25,8 @@ describe('createExporters()', () => {
         qos: 1,
         retain: true,
         clientId: 'test',
+        haDiscovery: true,
+        haDeviceName: 'BLE Scale',
       },
     };
     const exporters = createExporters(config);
@@ -42,6 +44,8 @@ describe('createExporters()', () => {
         qos: 1,
         retain: true,
         clientId: 'test',
+        haDiscovery: true,
+        haDeviceName: 'BLE Scale',
       },
     };
     const exporters = createExporters(config);
