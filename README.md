@@ -439,6 +439,10 @@ $env:DEBUG="true"; npm start
 
 BLE protocols were ported from [**openScale**](https://github.com/oliexdev/openScale), an open-source Android app for Bluetooth scales by oliexdev and contributors. All 23 adapters have been cross-referenced against the openScale Java/Kotlin source to verify byte offsets, init sequences, and protocol correctness.
 
+### Garmin Connect Upload
+
+Garmin Connect authentication and upload is powered by [**garminconnect**](https://github.com/cyberjunky/python-garminconnect) by cyberjunky (Ron Klinkien) and contributors.
+
 ### Body Composition Formulas
 
 | Formula | Authors | Used For |
