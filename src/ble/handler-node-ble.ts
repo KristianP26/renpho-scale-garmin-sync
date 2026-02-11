@@ -14,6 +14,7 @@ import {
   MAX_CONNECT_RETRIES,
   DISCOVERY_TIMEOUT_MS,
   DISCOVERY_POLL_MS,
+  POST_DISCOVERY_QUIESCE_MS,
 } from './types.js';
 
 type Device = NodeBle.Device;
@@ -90,23 +91,55 @@ async function startDiscoverySafe(btAdapter: Adapter): Promise<boolean> {
   return false;
 }
 
-async function connectWithRetries(device: Device, maxRetries: number): Promise<void> {
+/** Remove a device from BlueZ D-Bus cache to force a fresh proxy on re-discovery. */
+async function removeDevice(btAdapter: Adapter, mac: string): Promise<void> {
+  try {
+    const devSerialized = `dev_${formatMac(mac).replace(/:/g, '_')}`;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const adapterHelper = (btAdapter as any).helper;
+    await adapterHelper.callMethod('RemoveDevice', `${adapterHelper.object}/${devSerialized}`);
+    bleLog.debug('Removed device from BlueZ cache');
+  } catch {
+    // Device wasn't in cache — expected on first call
+  }
+}
+
+interface ConnectRecoveryContext {
+  btAdapter: Adapter;
+  mac: string;
+  initialDevice: Device;
+  maxRetries: number;
+}
+
+/**
+ * Connect to a BLE device with recovery for BlueZ-specific failures.
+ * On each failed attempt: disconnect → RemoveDevice → re-discover → quiesce → retry.
+ * Returns the (possibly refreshed) Device reference.
+ */
+async function connectWithRecovery(ctx: ConnectRecoveryContext): Promise<Device> {
+  const { btAdapter, mac, maxRetries } = ctx;
+  const formattedMac = formatMac(mac);
+  let device = ctx.initialDevice;
+
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
       const t0 = Date.now();
       bleLog.debug(`Connect attempt ${attempt + 1}/${maxRetries + 1}...`);
       await withTimeout(device.connect(), CONNECT_TIMEOUT_MS, 'Connection timed out');
       bleLog.debug(`Connected (took ${Date.now() - t0}ms)`);
-      return;
+      return device;
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       if (attempt >= maxRetries) {
         throw new Error(`Connection failed after ${maxRetries + 1} attempts: ${msg}`);
       }
+
       const delay = 1000 + attempt * 500;
       bleLog.warn(
         `Connect error: ${msg}. Retrying (${attempt + 1}/${maxRetries}) in ${delay}ms...`,
       );
+
+      // 1. Disconnect (best-effort)
       try {
         bleLog.debug('Disconnecting before retry...');
         await device.disconnect();
@@ -114,16 +147,50 @@ async function connectWithRetries(device: Device, maxRetries: number): Promise<v
       } catch {
         bleLog.debug('Disconnect failed (ignored)');
       }
+
+      // 2. Purge stale D-Bus proxy
+      await removeDevice(btAdapter, mac);
+
+      // 3. Progressive delay
       await sleep(delay);
+
+      // 4. Re-discover and acquire fresh device reference
+      try {
+        await startDiscoverySafe(btAdapter);
+        device = await withTimeout(
+          btAdapter.waitDevice(formattedMac),
+          DISCOVERY_TIMEOUT_MS,
+          `Device ${formattedMac} not found during retry`,
+        );
+
+        try {
+          await btAdapter.stopDiscovery();
+        } catch {
+          bleLog.debug('stopDiscovery failed during retry (ignored)');
+        }
+        await sleep(POST_DISCOVERY_QUIESCE_MS);
+      } catch (retryErr: unknown) {
+        bleLog.debug(`Re-discovery during retry failed: ${errMsg(retryErr)}`);
+        // Fallback: try to get device directly without re-discovery
+        try {
+          device = await btAdapter.getDevice(formattedMac);
+        } catch {
+          throw new Error(
+            `Connection failed and device re-acquisition failed: ${errMsg(retryErr)}`,
+          );
+        }
+      }
     }
   }
+
+  throw new Error('Connection failed');
 }
 
 async function autoDiscover(
   btAdapter: Adapter,
   adapters: ScaleAdapter[],
   abortSignal?: AbortSignal,
-): Promise<{ device: Device; adapter: ScaleAdapter }> {
+): Promise<{ device: Device; adapter: ScaleAdapter; mac: string }> {
   const deadline = Date.now() + DISCOVERY_TIMEOUT_MS;
   const checked = new Set<string>();
   let heartbeat = 0;
@@ -151,7 +218,7 @@ async function autoDiscover(
         const matched = adapters.find((a) => a.matches(info));
         if (matched) {
           bleLog.info(`Auto-discovered: ${matched.name} (${name} [${addr}])`);
-          return { device: dev, adapter: matched };
+          return { device: dev, adapter: matched, mac: addr };
         }
       } catch {
         /* device may have gone away */
@@ -246,15 +313,7 @@ export async function scanAndRead(opts: ScanOptions): Promise<BodyComposition> {
     // "interface not found in proxy object" errors on reconnect.
     // Removing it forces a fresh discovery + proxy creation.
     if (targetMac) {
-      try {
-        const devSerialized = `dev_${formatMac(targetMac).replace(/:/g, '_')}`;
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const adapterHelper = (btAdapter as any).helper;
-        await adapterHelper.callMethod('RemoveDevice', `${adapterHelper.object}/${devSerialized}`);
-        bleLog.debug('Removed stale device from BlueZ cache');
-      } catch {
-        // Device wasn't in cache — expected on first scan
-      }
+      await removeDevice(btAdapter, targetMac);
     }
 
     await startDiscoverySafe(btAdapter);
@@ -311,8 +370,14 @@ export async function scanAndRead(opts: ScanOptions): Promise<BodyComposition> {
       } catch {
         bleLog.debug('stopDiscovery failed (may already be stopped)');
       }
+      await sleep(POST_DISCOVERY_QUIESCE_MS);
 
-      await connectWithRetries(device, MAX_CONNECT_RETRIES);
+      device = await connectWithRecovery({
+        btAdapter,
+        mac: targetMac,
+        initialDevice: device,
+        maxRetries: MAX_CONNECT_RETRIES,
+      });
       bleLog.info('Connected. Discovering services...');
 
       // Match adapter using device name + GATT service UUIDs (post-connect)
@@ -349,8 +414,14 @@ export async function scanAndRead(opts: ScanOptions): Promise<BodyComposition> {
       } catch {
         bleLog.debug('stopDiscovery failed (may already be stopped)');
       }
+      await sleep(POST_DISCOVERY_QUIESCE_MS);
 
-      await connectWithRetries(device, MAX_CONNECT_RETRIES);
+      device = await connectWithRecovery({
+        btAdapter,
+        mac: result.mac,
+        initialDevice: device,
+        maxRetries: MAX_CONNECT_RETRIES,
+      });
       bleLog.info('Connected. Discovering services...');
     }
 

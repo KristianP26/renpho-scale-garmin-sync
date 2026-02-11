@@ -11,6 +11,9 @@ export const MAX_CONNECT_RETRIES = 5;
 export const DISCOVERY_TIMEOUT_MS = 120_000;
 export const DISCOVERY_POLL_MS = 2_000;
 
+/** Delay after stopping BlueZ discovery to let the radio quiesce before connecting. */
+export const POST_DISCOVERY_QUIESCE_MS = 500;
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export interface ScanOptions {
