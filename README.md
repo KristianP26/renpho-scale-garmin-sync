@@ -378,7 +378,9 @@ Unit tests use [Vitest](https://vitest.dev/) and cover:
 - **Environment validation** — `validate-env.ts` (all validation rules and edge cases)
 - **Scale adapters** — `parseNotification()`, `matches()`, `isComplete()`, `computeMetrics()`, and `onConnected()` for all 23 adapters
 - **Exporters** — config parsing, MQTT publish/HA discovery, Garmin subprocess, Webhook/InfluxDB/Ntfy delivery
-- **Utilities** — shared retry logic (`withRetry`)
+- **Orchestrator** — healthcheck runner, export dispatch, parallel execution, partial/total failure handling
+- **BLE shared logic** — `waitForReading()` in legacy, onConnected, and multi-char modes; weight normalization; disconnect handling
+- **Utilities** — shared retry logic (`withRetry`), abort-signal sleep
 
 ### Linting & Formatting
 
@@ -396,7 +398,8 @@ The project uses [ESLint](https://eslint.org/) with [typescript-eslint](https://
 ```
 ble-scale-sync/
 ├── src/
-│   ├── index.ts                    # Main orchestrator
+│   ├── index.ts                    # Entry point (config, signals, scan cycle, continuous mode)
+│   ├── orchestrator.ts             # Exported orchestration logic (healthchecks, export dispatch)
 │   ├── ble/
 │   │   ├── index.ts                # OS detection + dynamic import barrel
 │   │   ├── types.ts                # ScanOptions, ScanResult, constants, utilities

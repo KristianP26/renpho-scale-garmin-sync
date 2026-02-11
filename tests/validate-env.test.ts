@@ -26,14 +26,10 @@ function clearEnvKeys(...keys: string[]) {
 }
 
 describe('loadConfig()', () => {
-  const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => {
-    throw new Error('process.exit called');
-  });
   const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
   beforeEach(() => {
     vi.unstubAllEnvs();
-    exitSpy.mockClear();
     errorSpy.mockClear();
   });
 
@@ -219,33 +215,28 @@ describe('loadConfig()', () => {
   });
 
   describe('missing required vars', () => {
-    it('exits when USER_HEIGHT is missing', () => {
+    it('throws when USER_HEIGHT is missing', () => {
       setEnv();
       clearEnvKeys('USER_HEIGHT');
-      expect(() => loadConfig()).toThrow();
-      expect(exitSpy).toHaveBeenCalledWith(1);
-      expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('USER_HEIGHT'));
+      expect(() => loadConfig()).toThrow('USER_HEIGHT');
     });
 
-    it('exits when USER_BIRTH_DATE is missing', () => {
+    it('throws when USER_BIRTH_DATE is missing', () => {
       setEnv();
       clearEnvKeys('USER_BIRTH_DATE');
-      expect(() => loadConfig()).toThrow();
-      expect(exitSpy).toHaveBeenCalledWith(1);
+      expect(() => loadConfig()).toThrow('USER_BIRTH_DATE');
     });
 
-    it('exits when USER_GENDER is missing', () => {
+    it('throws when USER_GENDER is missing', () => {
       setEnv();
       clearEnvKeys('USER_GENDER');
-      expect(() => loadConfig()).toThrow();
-      expect(exitSpy).toHaveBeenCalledWith(1);
+      expect(() => loadConfig()).toThrow('USER_GENDER');
     });
 
-    it('exits when USER_IS_ATHLETE is missing', () => {
+    it('throws when USER_IS_ATHLETE is missing', () => {
       setEnv();
       clearEnvKeys('USER_IS_ATHLETE');
-      expect(() => loadConfig()).toThrow();
-      expect(exitSpy).toHaveBeenCalledWith(1);
+      expect(() => loadConfig()).toThrow('USER_IS_ATHLETE');
     });
   });
 

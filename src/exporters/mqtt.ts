@@ -48,6 +48,22 @@ const HA_METRICS: HaMetricDef[] = [
   { key: 'metabolicAge', name: 'Metabolic Age', unit: 'yr', icon: 'mdi:calendar-clock' },
 ];
 
+// Compile-time check: fails if a field is added to BodyComposition but not to HA_METRICS
+const _haKeysCheck: Record<keyof BodyComposition, true> = {
+  weight: true,
+  impedance: true,
+  bmi: true,
+  bodyFatPercent: true,
+  waterPercent: true,
+  boneMass: true,
+  muscleMass: true,
+  visceralFat: true,
+  physiqueRating: true,
+  bmr: true,
+  metabolicAge: true,
+};
+void _haKeysCheck;
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type MqttClient = { publishAsync: any; endAsync: any };
 

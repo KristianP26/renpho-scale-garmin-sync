@@ -24,6 +24,22 @@ const INT_FIELDS: (keyof BodyComposition)[] = [
   'metabolicAge',
 ];
 
+// Compile-time check: fails if a field is added to BodyComposition but not covered above
+const _fieldCheck: Record<keyof BodyComposition, true> = {
+  weight: true,
+  bmi: true,
+  bodyFatPercent: true,
+  waterPercent: true,
+  boneMass: true,
+  muscleMass: true,
+  impedance: true,
+  visceralFat: true,
+  physiqueRating: true,
+  bmr: true,
+  metabolicAge: true,
+};
+void _fieldCheck;
+
 export function toLineProtocol(data: BodyComposition, measurement: string): string {
   const fields: string[] = [];
 

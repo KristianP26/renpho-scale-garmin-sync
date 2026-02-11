@@ -22,7 +22,7 @@ export interface Config {
 
 function fail(msg: string): never {
   log.error(msg);
-  process.exit(1);
+  throw new Error(msg);
 }
 
 function requireEnv(key: string): string {
