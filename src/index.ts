@@ -8,6 +8,7 @@ import { abortableSleep } from './ble/types.js';
 import { adapters } from './scales/index.js';
 import { loadConfig } from './validate-env.js';
 import { createLogger } from './logger.js';
+import { errMsg } from './utils/error.js';
 import { loadExporterConfig, createExporters } from './exporters/index.js';
 import { runHealthchecks, dispatchExports } from './orchestrator.js';
 import type { Exporter } from './interfaces/exporter.js';
@@ -117,9 +118,9 @@ async function main(): Promise<void> {
       if (signal.aborted) break;
       log.info(`\nWaiting ${scanCooldownSec}s before next scan...`);
       await abortableSleep(scanCooldownSec * 1000, signal);
-    } catch {
+    } catch (err) {
       if (signal.aborted) break;
-      log.info('No scale found, retrying...');
+      log.info(`No scale found, retrying... (${errMsg(err)})`);
     }
   }
 
