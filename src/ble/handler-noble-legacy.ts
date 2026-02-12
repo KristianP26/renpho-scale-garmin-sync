@@ -196,12 +196,16 @@ function discoverPeripheral(
 
     abortSignal?.addEventListener('abort', onAbort, { once: true });
 
+    const seen = new Set<string>();
     const onDiscover = (peripheral: Peripheral): void => {
       const name = peripheral.advertisement?.localName ?? '';
       const addr = peripheralAddress(peripheral);
       const svcUuids = (peripheral.advertisement?.serviceUuids ?? []).map(normalizeUuid);
 
-      bleLog.debug(`Discovered: ${name || '(no name)'} [${addr}]`);
+      if (!seen.has(addr)) {
+        seen.add(addr);
+        bleLog.debug(`Discovered: ${name || '(no name)'} [${addr}]`);
+      }
 
       if (targetMac) {
         // Target mode: match by MAC or CoreBluetooth UUID
