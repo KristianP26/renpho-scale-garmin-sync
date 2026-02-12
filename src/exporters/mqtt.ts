@@ -113,12 +113,20 @@ export class MqttExporter implements Exporter {
   async healthcheck(): Promise<ExportResult> {
     try {
       const { connectAsync } = await import('mqtt');
-      const client = await connectAsync(this.config.brokerUrl, {
-        clientId: `${this.config.clientId}-healthcheck`,
-        username: this.config.username,
-        password: this.config.password,
-        connectTimeout: CONNECT_TIMEOUT_MS,
-      });
+      const client = await Promise.race([
+        connectAsync(this.config.brokerUrl, {
+          clientId: `${this.config.clientId}-healthcheck`,
+          username: this.config.username,
+          password: this.config.password,
+          connectTimeout: CONNECT_TIMEOUT_MS,
+        }),
+        new Promise<never>((_resolve, reject) =>
+          setTimeout(
+            () => reject(new Error('MQTT healthcheck timed out')),
+            CONNECT_TIMEOUT_MS + 2_000,
+          ),
+        ),
+      ]);
       await client.endAsync();
       return { success: true };
     } catch (err) {
@@ -135,15 +143,23 @@ export class MqttExporter implements Exporter {
 
     return withRetry(
       async () => {
-        const client = await connectAsync(brokerUrl, {
-          clientId,
-          username,
-          password,
-          connectTimeout: CONNECT_TIMEOUT_MS,
-          ...(statusTopic && {
-            will: { topic: statusTopic, payload: Buffer.from('offline'), qos: 1, retain: true },
+        const client = await Promise.race([
+          connectAsync(brokerUrl, {
+            clientId,
+            username,
+            password,
+            connectTimeout: CONNECT_TIMEOUT_MS,
+            ...(statusTopic && {
+              will: { topic: statusTopic, payload: Buffer.from('offline'), qos: 1, retain: true },
+            }),
           }),
-        });
+          new Promise<never>((_resolve, reject) =>
+            setTimeout(
+              () => reject(new Error('MQTT connection timed out')),
+              CONNECT_TIMEOUT_MS + 2_000,
+            ),
+          ),
+        ]);
 
         try {
           if (haDiscovery) {
