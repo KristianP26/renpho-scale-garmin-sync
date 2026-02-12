@@ -1,38 +1,96 @@
 import type { ScaleAdapter, BodyComposition } from '../interfaces/scale-adapter.js';
 import type { ScanOptions, ScanResult } from './types.js';
+import { bleLog } from './types.js';
 
 export type { ScanOptions, ScanResult } from './types.js';
+
+type NobleDriver = 'abandonware' | 'stoprocent';
+
+/** Resolve NOBLE_DRIVER env var to a specific noble driver, or null for OS default. */
+function resolveNobleDriver(): NobleDriver | null {
+  const driver = process.env.NOBLE_DRIVER?.toLowerCase();
+  if (driver === 'abandonware') return 'abandonware';
+  if (driver === 'stoprocent') return 'stoprocent';
+  return null;
+}
+
+/** Determine which BLE handler will be used and return its name for logging. */
+function resolveHandlerName(driver: NobleDriver | null): string {
+  if (driver === 'abandonware') return 'noble-legacy (@abandonware/noble)';
+  if (driver === 'stoprocent') return 'noble (@stoprocent/noble)';
+  if (process.platform === 'linux') return 'node-ble (BlueZ D-Bus)';
+  if (process.platform === 'win32') return 'noble-legacy (@abandonware/noble)';
+  return 'noble (@stoprocent/noble)';
+}
 
 /**
  * Scan for a BLE scale, read weight + impedance, and compute body composition.
  *
  * OS detection selects the BLE handler at runtime:
  * - Linux → node-ble (BlueZ D-Bus)
- * - Windows / macOS → noble
+ * - Windows → @abandonware/noble
+ * - macOS → @stoprocent/noble
  *
+ * Override with NOBLE_DRIVER=abandonware|stoprocent on any platform.
  * Dynamic import() ensures the unused library is never loaded.
  */
 export async function scanAndRead(opts: ScanOptions): Promise<BodyComposition> {
+  const driver = resolveNobleDriver();
+  bleLog.debug(`BLE handler: ${resolveHandlerName(driver)}`);
+
+  if (driver === 'abandonware') {
+    const { scanAndRead: impl } = await import('./handler-noble-legacy.js');
+    return impl(opts);
+  }
+  if (driver === 'stoprocent') {
+    const { scanAndRead: impl } = await import('./handler-noble.js');
+    return impl(opts);
+  }
+
+  // OS defaults (no NOBLE_DRIVER override)
   if (process.platform === 'linux') {
     const { scanAndRead: impl } = await import('./handler-node-ble.js');
     return impl(opts);
   }
+  if (process.platform === 'win32') {
+    const { scanAndRead: impl } = await import('./handler-noble-legacy.js');
+    return impl(opts);
+  }
+  // macOS and other platforms
   const { scanAndRead: impl } = await import('./handler-noble.js');
   return impl(opts);
 }
 
 /**
  * Scan for nearby BLE devices and identify recognized scales.
- * Uses the OS-appropriate BLE handler.
+ * Uses the OS-appropriate BLE handler (with NOBLE_DRIVER override support).
  */
 export async function scanDevices(
   adapters: ScaleAdapter[],
   durationMs?: number,
 ): Promise<ScanResult[]> {
+  const driver = resolveNobleDriver();
+  bleLog.debug(`BLE handler: ${resolveHandlerName(driver)}`);
+
+  if (driver === 'abandonware') {
+    const { scanDevices: impl } = await import('./handler-noble-legacy.js');
+    return impl(adapters, durationMs);
+  }
+  if (driver === 'stoprocent') {
+    const { scanDevices: impl } = await import('./handler-noble.js');
+    return impl(adapters, durationMs);
+  }
+
+  // OS defaults (no NOBLE_DRIVER override)
   if (process.platform === 'linux') {
     const { scanDevices: impl } = await import('./handler-node-ble.js');
     return impl(adapters, durationMs);
   }
+  if (process.platform === 'win32') {
+    const { scanDevices: impl } = await import('./handler-noble-legacy.js');
+    return impl(adapters, durationMs);
+  }
+  // macOS and other platforms
   const { scanDevices: impl } = await import('./handler-noble.js');
   return impl(adapters, durationMs);
 }

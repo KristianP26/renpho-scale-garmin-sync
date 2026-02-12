@@ -29,7 +29,8 @@
     "node": ">=20"
   },
   "dependencies": {
-    "@abandonware/noble": "^1.9.2-25",
+    "@abandonware/noble": "^1.9.2-26",
+    "@stoprocent/noble": "^2.3.10",
     "dotenv": "^16.4.7",
     "mqtt": "^5.10.0",
     "node-ble": "^1.13.0"

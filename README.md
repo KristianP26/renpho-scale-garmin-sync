@@ -74,7 +74,7 @@ While the project started for one scale, it now supports **23 scale adapters** c
 └──────────┘    └──────────────┘    └─────────────────────────────┘
 ```
 
-**TypeScript** (run via `tsx`) scans for a BLE scale using the OS-appropriate handler (node-ble on Linux, noble on Windows/macOS), auto-detects the brand via the adapter pattern, and calculates up to 10 body composition metrics. Results are dispatched in parallel to all enabled **exporters** — Garmin Connect, MQTT, Webhook, InfluxDB, Ntfy, or any combination.
+**TypeScript** (run via `tsx`) scans for a BLE scale using the OS-appropriate handler (node-ble on Linux, `@abandonware/noble` on Windows, `@stoprocent/noble` on macOS), auto-detects the brand via the adapter pattern, and calculates up to 10 body composition metrics. Both noble drivers can be used on any platform via the `NOBLE_DRIVER` env var. Results are dispatched in parallel to all enabled **exporters** — Garmin Connect, MQTT, Webhook, InfluxDB, Ntfy, or any combination.
 
 All exporters run in parallel. The process reports an error only if every exporter fails.
 
@@ -117,9 +117,9 @@ No additional Bluetooth setup needed — macOS uses its native CoreBluetooth API
 1. Install [Node.js](https://nodejs.org/) v20 or later — download the LTS installer and check "Add to PATH" during installation.
 2. Install [Visual Studio Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) (select "Desktop development with C++").
 3. Install [Python](https://python.org/) and check "Add to PATH" during installation.
-4. You need a BLE-compatible Bluetooth adapter. Most built-in adapters work, but you may need a [WinUSB driver setup with Zadig](https://zadig.akeo.ie/) for generic dongles.
+4. You need a BLE-compatible Bluetooth adapter. Most built-in adapters work out of the box with the default driver (`@abandonware/noble`).
 
-> **Note:** On Windows, `@abandonware/noble` requires the Bluetooth adapter to use WinUSB. See the [noble Windows setup guide](https://github.com/abandonware/noble#windows) for details.
+> **Note:** If you override `NOBLE_DRIVER=stoprocent` on Windows, `@stoprocent/noble` requires the Bluetooth adapter to use WinUSB. See the [noble Windows setup guide](https://github.com/nicedoc/noble#windows) for details. The default `@abandonware/noble` does not require this.
 
 ## Installation
 
@@ -188,6 +188,7 @@ All environment variables are validated at startup with clear error messages:
 | `WEIGHT_UNIT`     | No       | `kg` or `lbs` (default: `kg`) — display + scale input |
 | `HEIGHT_UNIT`     | No       | `cm` or `in` (default: `cm`) — for `USER_HEIGHT`    |
 | `SCALE_MAC`       | No       | MAC (`XX:XX:XX:XX:XX:XX`) or CoreBluetooth UUID (macOS) |
+| `NOBLE_DRIVER`    | No       | `abandonware` or `stoprocent` — override OS default noble driver |
 | `DRY_RUN`         | No       | `true` to skip exports (read scale + compute only) |
 | `CONTINUOUS_MODE` | No       | `true` to loop with auto-reconnect (default: `false`) |
 | `SCAN_COOLDOWN`   | No       | Seconds between scans in continuous mode (5–3600, default: `30`) |
@@ -405,7 +406,8 @@ ble-scale-sync/
 │   │   ├── types.ts                # ScanOptions, ScanResult, constants, utilities
 │   │   ├── shared.ts               # BleChar/BleDevice abstractions, waitForReading()
 │   │   ├── handler-node-ble.ts     # Linux: node-ble (BlueZ D-Bus)
-│   │   └── handler-noble.ts        # Windows/macOS: @abandonware/noble
+│   │   ├── handler-noble.ts        # macOS default: @stoprocent/noble
+│   │   └── handler-noble-legacy.ts # Windows default: @abandonware/noble
 │   ├── exporters/
 │   │   ├── index.ts                # Exporter registry — createExporters()
 │   │   ├── config.ts               # Exporter env validation + config parsing
@@ -567,7 +569,8 @@ $env:DEBUG="true"; npm start
 
 ### Windows BLE issues
 
-- Make sure your Bluetooth adapter uses the WinUSB driver (use [Zadig](https://zadig.akeo.ie/) to switch drivers if needed).
+- The default BLE driver on Windows is `@abandonware/noble`, which works with the native Windows Bluetooth stack — no special driver setup needed.
+- If you set `NOBLE_DRIVER=stoprocent`, you'll need the WinUSB driver (use [Zadig](https://zadig.akeo.ie/) to switch drivers).
 - Run your terminal as Administrator if you encounter permission errors.
 
 ## Credits
@@ -582,7 +585,7 @@ Garmin Connect authentication and upload is powered by [**garminconnect**](https
 
 ### BLE Libraries
 
-Low-level Bluetooth communication is provided by [**node-ble**](https://github.com/chrvadala/node-ble) (Linux/BlueZ D-Bus) and [**@abandonware/noble**](https://github.com/abandonware/noble) (Windows/macOS).
+Low-level Bluetooth communication is provided by [**node-ble**](https://github.com/chrvadala/node-ble) (Linux/BlueZ D-Bus), [**@abandonware/noble**](https://github.com/abandonware/noble) (Windows default), and [**@stoprocent/noble**](https://github.com/stoprocent/noble) (macOS default). Both noble forks can be used on any platform via `NOBLE_DRIVER`.
 
 ### Body Composition Formulas
 

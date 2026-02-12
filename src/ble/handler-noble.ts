@@ -1,5 +1,5 @@
-import noble from '@abandonware/noble';
-import type { Peripheral, Characteristic } from '@abandonware/noble';
+import noble from '@stoprocent/noble';
+import type { Peripheral, Characteristic, Service } from '@stoprocent/noble';
 import type { ScaleAdapter, BleDeviceInfo, BodyComposition } from '../interfaces/scale-adapter.js';
 import type { ScanOptions, ScanResult } from './types.js';
 import type { BleChar, BleDevice } from './shared.js';
@@ -125,18 +125,30 @@ async function connectWithRetries(peripheral: Peripheral, maxRetries: number): P
   }
 }
 
-// ─── Build charMap from noble GATT discovery ──────────────────────────────────
+// ─── Build charMap from pre-discovered services ─────────────────────────────
 
-async function buildCharMap(peripheral: Peripheral): Promise<Map<string, BleChar>> {
-  const { characteristics } = await peripheral.discoverAllServicesAndCharacteristicsAsync();
+/**
+ * Collect characteristics from each Service object instead of using the flat
+ * `characteristics` array returned by `discoverAllServicesAndCharacteristicsAsync()`.
+ *
+ * Noble's flat array silently drops characteristics when per-service discovery
+ * returns an error (the `if (error == null)` guard in peripheral.js). The per-
+ * service `service.characteristics` is always populated, so iterating services
+ * is more reliable — especially on WinRT where custom-service char discovery
+ * can fail intermittently.
+ */
+function wrapCharacteristics(services: Service[]): Map<string, BleChar> {
   const charMap = new Map<string, BleChar>();
-
-  for (const char of characteristics) {
-    const normalized = normalizeUuid(char.uuid);
-    bleLog.debug(`  Char ${char.uuid} (${normalized}) props=[${char.properties.join(',')}]`);
-    charMap.set(normalized, wrapChar(char));
+  for (const svc of services) {
+    const svcId = normalizeUuid(svc.uuid);
+    const chars: Characteristic[] = svc.characteristics ?? [];
+    bleLog.debug(`Service ${svcId}: ${chars.length} characteristic(s)`);
+    for (const char of chars) {
+      const normalized = normalizeUuid(char.uuid);
+      bleLog.debug(`  Char ${char.uuid} (${normalized}) props=[${char.properties.join(',')}]`);
+      charMap.set(normalized, wrapChar(char));
+    }
   }
-
   return charMap;
 }
 
@@ -245,54 +257,75 @@ export async function scanAndRead(opts: ScanOptions): Promise<BodyComposition> {
     );
 
     await connectWithRetries(peripheral, MAX_CONNECT_RETRIES);
-    bleLog.info('Connected. Discovering services...');
-
-    let matchedAdapter: ScaleAdapter;
-
-    if (discoveredAdapter) {
-      matchedAdapter = discoveredAdapter;
-    } else {
-      // Target-MAC mode: match adapter post-connect using full service list
-      const { services } = await peripheral.discoverAllServicesAndCharacteristicsAsync();
-      const serviceUuids = services.map((s) => normalizeUuid(s.uuid));
-      const name = peripheral.advertisement?.localName ?? '';
-      bleLog.debug(`Services: [${serviceUuids.join(', ')}]`);
-
-      const info: BleDeviceInfo = { localName: name, serviceUuids };
-      const found = adapters.find((a) => a.matches(info));
-      if (!found) {
-        throw new Error(
-          `Device found (${name}) but no adapter recognized it. ` +
-            `Services: [${serviceUuids.join(', ')}]. ` +
-            `Adapters: ${adapters.map((a) => a.name).join(', ')}`,
-        );
-      }
-      matchedAdapter = found;
-    }
-
-    bleLog.info(`Matched adapter: ${matchedAdapter.name}`);
-
-    // Build charMap (re-discover if we already called discoverAll above for adapter matching)
-    const charMap = await withTimeout(
-      buildCharMap(peripheral),
-      GATT_DISCOVERY_TIMEOUT_MS,
-      'GATT service discovery timed out',
-    );
-    const payload = await waitForReading(
-      charMap,
-      wrapPeripheral(peripheral),
-      matchedAdapter,
-      profile,
-      weightUnit,
-      onLiveData,
-    );
-
     try {
-      await peripheral.disconnectAsync();
-    } catch {
-      /* ignore */
+      bleLog.info('Connected. Discovering services...');
+
+      // Sequential per-service discovery — one GATT request at a time.
+      // discoverAllServicesAndCharacteristicsAsync() fires all per-service
+      // characteristic discoveries in parallel (peripheral.js line 124-141),
+      // which overwhelms low-power BLE devices on WinRT.
+      const services = await withTimeout(
+        (async () => {
+          const svcs = await peripheral.discoverServicesAsync();
+          for (const svc of svcs) {
+            try {
+              await svc.discoverCharacteristicsAsync();
+            } catch {
+              // WinRT may return AccessDenied on first attempt for custom services.
+              // Retrying after a short delay lets WinRT's GATT cache settle
+              // (mirrors old @abandonware/noble's accidental two-call warm-up).
+              await sleep(1000);
+              await svc.discoverCharacteristicsAsync();
+            }
+          }
+          return svcs;
+        })(),
+        GATT_DISCOVERY_TIMEOUT_MS,
+        'GATT service discovery timed out',
+      );
+
+      let matchedAdapter: ScaleAdapter;
+
+      if (discoveredAdapter) {
+        matchedAdapter = discoveredAdapter;
+      } else {
+        // Target-MAC mode: match adapter post-connect using full service list
+        const serviceUuids = services.map((s) => normalizeUuid(s.uuid));
+        const name = peripheral.advertisement?.localName ?? '';
+        bleLog.debug(`Services: [${serviceUuids.join(', ')}]`);
+
+        const info: BleDeviceInfo = { localName: name, serviceUuids };
+        const found = adapters.find((a) => a.matches(info));
+        if (!found) {
+          throw new Error(
+            `Device found (${name}) but no adapter recognized it. ` +
+              `Services: [${serviceUuids.join(', ')}]. ` +
+              `Adapters: ${adapters.map((a) => a.name).join(', ')}`,
+          );
+        }
+        matchedAdapter = found;
+      }
+
+      bleLog.info(`Matched adapter: ${matchedAdapter.name}`);
+
+      const charMap = wrapCharacteristics(services);
+      const payload = await waitForReading(
+        charMap,
+        wrapPeripheral(peripheral),
+        matchedAdapter,
+        profile,
+        weightUnit,
+        onLiveData,
+      );
+
+      return payload;
+    } finally {
+      try {
+        await peripheral.disconnectAsync();
+      } catch {
+        /* ignore */
+      }
     }
-    return payload;
   } finally {
     // Safety net: stop any leftover scanning (targeted — not removeAllListeners)
     noble.stopScanningAsync().catch(() => {});
