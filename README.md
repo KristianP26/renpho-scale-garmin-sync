@@ -141,6 +141,8 @@ pip install -r requirements.txt
 
 ## Configuration
 
+> **Coming soon:** A structured `config.yaml` format with multi-user support, an interactive setup wizard (`npm run setup`), and Docker deployment. The `.env` configuration below continues to work and will remain supported as a fallback.
+
 ### 1. Create your `.env` file
 
 ```bash
