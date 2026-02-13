@@ -139,7 +139,22 @@ pip install -r requirements.txt
 
 ## Configuration
 
-The app uses **`config.yaml`** for configuration. Create it in the project root or specify a path with `--config`.
+The easiest way to configure the app is with the **interactive setup wizard**:
+
+```bash
+npm run setup
+```
+
+The wizard walks you through all steps: BLE scale discovery, user profiles, exporter selection, runtime settings, and connectivity tests. If `config.yaml` already exists, the wizard offers **edit mode** — pick any section to reconfigure without starting over.
+
+```bash
+npm run setup                              # Interactive wizard
+npm run setup -- --config /path/to/config.yaml  # Custom config path
+npm run setup -- --non-interactive         # Validate + enrich existing YAML (CI-friendly)
+npm run setup -- --help                    # Show wizard usage
+```
+
+Alternatively, create `config.yaml` manually in the project root or specify a path with `--config`.
 
 #### CLI Flags
 
@@ -463,6 +478,7 @@ Unit tests use [Vitest](https://vitest.dev/) and cover:
 - **BLE utilities** — `formatMac()`, `normalizeUuid()`, `sleep()`, `withTimeout()`, abort signal handling
 - **Logger** — `createLogger()`, `setLogLevel()`
 - **Utilities** — shared retry logic (`withRetry`), error conversion (`errMsg`)
+- **Setup wizard** — runner (step ordering, back navigation, edit mode), user profile prompts (validation, lbs→kg conversion, slug generation), exporter schema-driven field rendering, non-interactive mode (validation + slug enrichment), platform detection (OS, Docker, Python)
 
 ### Linting & Formatting
 
@@ -506,6 +522,24 @@ ble-scale-sync/
 │   │   ├── webhook.ts              # Webhook exporter (generic HTTP)
 │   │   ├── influxdb.ts             # InfluxDB v2 exporter (line protocol)
 │   │   └── ntfy.ts                 # Ntfy push notification exporter
+│   ├── wizard/
+│   │   ├── index.ts                # Entry point for npm run setup
+│   │   ├── types.ts                # WizardStep, WizardContext, PromptProvider, BackNavigation
+│   │   ├── runner.ts               # Step sequencer (sequential + edit mode)
+│   │   ├── non-interactive.ts      # Non-interactive validation + slug enrichment
+│   │   ├── platform.ts             # OS/Docker/Python detection
+│   │   ├── prompt-provider.ts      # Real + mock prompt providers (DI)
+│   │   ├── ui.ts                   # Banner, icons, section boxes, chalk helpers
+│   │   └── steps/
+│   │       ├── index.ts            # Step registry (WIZARD_STEPS)
+│   │       ├── welcome.ts          # Banner + edit mode detection
+│   │       ├── ble.ts              # BLE scale discovery / manual MAC entry
+│   │       ├── users.ts            # User profile setup (name, slug, height, etc.)
+│   │       ├── exporters.ts        # Unified exporter selection (schema-driven prompts)
+│   │       ├── garmin-auth.ts      # Garmin Connect authentication
+│   │       ├── runtime.ts          # Runtime settings (continuous, cooldown, etc.)
+│   │       ├── validate.ts         # Exporter connectivity tests
+│   │       └── summary.ts          # Config review + YAML save
 │   ├── utils/
 │   │   ├── retry.ts                # Shared retry utility (withRetry) used by all exporters
 │   │   └── error.ts                # Shared error utility (errMsg) for unknown→string conversion
@@ -548,6 +582,7 @@ ble-scale-sync/
 │   ├── logger.test.ts              # Logger utility tests
 │   ├── helpers/
 │   │   └── scale-test-utils.ts     # Shared test utilities (mock peripheral, etc.)
+│   ├── wizard/                     # Wizard tests (runner, users, exporters, non-interactive, platform)
 │   ├── config/                     # Config tests (schema, slugify, load, resolve, write, matching)
 │   ├── ble/                        # BLE tests (shared logic, utilities, abort signal)
 │   ├── utils/                      # Utility tests (retry, error)
