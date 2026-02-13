@@ -8,15 +8,15 @@ Works on **Linux** (including Raspberry Pi), **macOS**, and **Windows**.
 
 ### Export Targets
 
-| Target | Description | Protocol | Auth |
-| --- | --- | --- | --- |
-| **Garmin Connect** | Automatic body composition upload — no phone app needed | Python subprocess | Email + password (tokens cached) |
-| **MQTT** | Home automation integration with **Home Assistant auto-discovery** | MQTT 5.0 | Optional username/password |
-| **Webhook** | Generic HTTP endpoint — n8n, Make, Zapier, custom APIs | HTTP POST/PUT | Custom headers |
-| **InfluxDB** | Time-series database (v2 write API, line protocol) | HTTP | Token |
-| **Ntfy** | Push notifications to phone/desktop via [ntfy.sh](https://ntfy.sh) | HTTP | Optional Bearer/Basic |
+| Target             | Description                                                        | Protocol          | Auth                             |
+| ------------------ | ------------------------------------------------------------------ | ----------------- | -------------------------------- |
+| **Garmin Connect** | Automatic body composition upload — no phone app needed            | Python subprocess | Email + password (tokens cached) |
+| **MQTT**           | Home automation integration with **Home Assistant auto-discovery** | MQTT 5.0          | Optional username/password       |
+| **Webhook**        | Generic HTTP endpoint — n8n, Make, Zapier, custom APIs             | HTTP POST/PUT     | Custom headers                   |
+| **InfluxDB**       | Time-series database (v2 write API, line protocol)                 | HTTP              | Token                            |
+| **Ntfy**           | Push notifications to phone/desktop via [ntfy.sh](https://ntfy.sh) | HTTP              | Optional Bearer/Basic            |
 
-All exporters run in parallel. Enable any combination via `EXPORTERS=garmin,mqtt,webhook,influxdb,ntfy`. Each exporter is self-describing — it declares its configuration fields, display names, and capabilities — making it easy to add new export targets.
+All exporters run in parallel. Configure any combination in `global_exporters` (or per-user `exporters`) in `config.yaml`. Each exporter is self-describing — it declares its configuration fields, display names, and capabilities — making it easy to add new export targets.
 
 ## Why This Exists
 
@@ -28,11 +28,11 @@ While the project started for one scale, it now supports **23 scale adapters** c
 
 ### Recommended Setup
 
-| Component | Recommendation |
-| --- | --- |
+| Component                 | Recommendation                                                                                                                          |
+| ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
 | **Single-board computer** | [Raspberry Pi Zero 2W](https://www.raspberrypi.com/products/raspberry-pi-zero-2-w/) — cheap, tiny, built-in BLE, low power (~0.4W idle) |
-| **Scale** | Any supported BLE scale (see list below) |
-| **OS** | Raspberry Pi OS Lite (headless, no desktop needed) |
+| **Scale**                 | Any supported BLE scale (see list below)                                                                                                |
+| **OS**                    | Raspberry Pi OS Lite (headless, no desktop needed)                                                                                      |
 
 ### Supported Scales
 
@@ -141,7 +141,7 @@ pip install -r requirements.txt
 
 ## Configuration
 
-The app supports two configuration methods: **`config.yaml`** (recommended) and **`.env`** (legacy fallback). If both exist, `config.yaml` takes priority.
+The app uses **`config.yaml`** for configuration. Create it in the project root or specify a path with `--config`.
 
 #### CLI Flags
 
@@ -152,61 +152,114 @@ npm run validate                              # Validate config.yaml and show su
 npm run validate -- --config /path/to/config.yaml  # Validate a custom config file
 ```
 
-Environment variables (`CONTINUOUS_MODE`, `DRY_RUN`, `DEBUG`, `SCAN_COOLDOWN`, `SCALE_MAC`, `NOBLE_DRIVER`) always override the corresponding values in `config.yaml`, regardless of config source.
+#### Environment Overrides
 
-> **Coming soon:** An interactive setup wizard (`npm run setup`) and Docker deployment. The `.env` configuration below continues to work and will remain supported as a fallback.
+These environment variables always override the corresponding `config.yaml` values:
 
-### 1. Create your `.env` file
+| Variable          | Overrides                 |
+| ----------------- | ------------------------- |
+| `CONTINUOUS_MODE` | `runtime.continuous_mode` |
+| `DRY_RUN`         | `runtime.dry_run`         |
+| `DEBUG`           | `runtime.debug`           |
+| `SCAN_COOLDOWN`   | `runtime.scan_cooldown`   |
+| `SCALE_MAC`       | `ble.scale_mac`           |
+| `NOBLE_DRIVER`    | `ble.noble_driver`        |
 
-```bash
-cp .env.example .env
+> **Legacy:** `.env` is also supported as a fallback — see `.env.example`. If both files exist, `config.yaml` takes priority.
+
+### 1. Create your `config.yaml`
+
+```yaml
+version: 1
+
+ble:
+  scale_mac: 'FF:03:00:13:A1:04' # Optional — omit for auto-discovery
+  # noble_driver: abandonware       # Optional — "abandonware" | "stoprocent"
+
+scale:
+  weight_unit: kg # kg | lbs (display only — all calculations use kg)
+  height_unit: cm # cm | in (for height input)
+
+# Multi-user matching: when weight falls outside all ranges
+# "nearest" = assign to closest range midpoint, "log" = log warning + skip, "ignore" = silently skip
+unknown_user: nearest
+
+users:
+  - name: Alice
+    slug: alice
+    height: 168
+    birth_date: '1995-03-20'
+    gender: female
+    is_athlete: false
+    weight_range: { min: 50, max: 75 }
+    last_known_weight: null # Updated automatically after each measurement
+    # Per-user exporters (optional — override global_exporters for this user)
+    # exporters:
+    #   - type: garmin
+    #     email: alice@example.com
+    #     password: "${GARMIN_PASSWORD}"
+    #     token_dir: ./garmin-tokens/alice
+
+  - name: Bob
+    slug: bob
+    height: 183
+    birth_date: '1990-06-15'
+    gender: male
+    is_athlete: true
+    weight_range: { min: 75, max: 100 }
+    last_known_weight: 85.5
+
+global_exporters:
+  - type: garmin
+    email: your_email@example.com
+    password: '${GARMIN_PASSWORD}' # ${ENV_VAR} references are resolved at load time
+    token_dir: ~/.garmin_tokens
+
+  - type: mqtt
+    broker_url: 'mqtt://localhost:1883'
+    topic: scale/body-composition
+    qos: 1 # 0, 1, or 2
+    retain: true
+    username: myuser
+    password: '${MQTT_PASSWORD}'
+    client_id: ble-scale-sync
+    ha_discovery: true # Home Assistant auto-discovery
+    ha_device_name: BLE Scale
+
+  # - type: webhook
+  #   url: "https://example.com/hook"
+  #   method: POST
+  #   headers:
+  #     X-Api-Key: secret123
+  #   timeout: 10000
+
+  # - type: influxdb
+  #   url: "http://localhost:8086"
+  #   token: "${INFLUXDB_TOKEN}"
+  #   org: my-org
+  #   bucket: my-bucket
+  #   measurement: body_composition
+
+  # - type: ntfy
+  #   url: "https://ntfy.sh"
+  #   topic: my-scale
+  #   title: Scale Measurement
+  #   priority: 3
+
+runtime:
+  continuous_mode: false
+  scan_cooldown: 30 # Seconds between scans (5–3600)
+  dry_run: false
+  debug: false
 ```
 
-Edit `.env` with your personal details:
+YAML values support `${ENV_VAR}` references — useful for secrets (passwords, tokens). The referenced environment variable must be defined, otherwise config loading fails with an error.
 
-```ini
-GARMIN_EMAIL=you@example.com
-GARMIN_PASSWORD=your_password
+`weight_unit` and `height_unit` default to metric (`kg` / `cm`). Set `height_unit: in` to enter `height` in inches. Set `weight_unit: lbs` to display weight in pounds — all internal calculations and Garmin uploads remain in metric.
 
-USER_HEIGHT=183
-USER_BIRTH_DATE=2000-06-15
-USER_GENDER=male
-USER_IS_ATHLETE=true
+`scale_mac` is **optional**. If omitted, the app auto-discovers any recognized scale during `npm start`. To pin to a specific device, add the MAC address from `npm run scan`.
 
-# Optional — measurement units (both default to metric)
-WEIGHT_UNIT=kg
-HEIGHT_UNIT=cm
-```
-
-`WEIGHT_UNIT` and `HEIGHT_UNIT` are **optional** and default to metric (`kg` / `cm`). Set `HEIGHT_UNIT=in` to enter `USER_HEIGHT` in inches. Set `WEIGHT_UNIT=lbs` if your scale transmits in pounds — the app will convert to kg for calculations and display weight in lbs. All internal calculations and Garmin uploads remain in metric.
-
-> **Note:** Some adapters (Mi Scale 2, Standard GATT BCS/WSS, Sanitas SBF72/73) auto-detect the scale's unit from BLE flags and always normalize to kg. For those scales, `WEIGHT_UNIT` only affects console display. For all other scales, `WEIGHT_UNIT=lbs` also converts the raw scale reading from lbs to kg before processing.
-
-`SCALE_MAC` is **optional**. If omitted, the app auto-discovers any recognized scale during `npm start`. To pin to a specific device, add:
-
-```ini
-SCALE_MAC=FF:03:00:13:A1:04
-```
-
-> **Recommended:** Set `SCALE_MAC` to your scale's MAC address. Without it, the app connects to the first recognized scale it finds — which could be a neighbor's scale, since BLE signals easily pass through walls. Run `npm run scan` to find your scale's address.
-
-All environment variables are validated at startup with clear error messages:
-
-| Variable          | Required | Validation                                           |
-| ----------------- | -------- | ---------------------------------------------------- |
-| `GARMIN_EMAIL`    | Yes      | Validated on Python side                             |
-| `GARMIN_PASSWORD` | Yes      | Validated on Python side                             |
-| `USER_HEIGHT`     | Yes      | Number, 50–250 cm (or 20–100 if `HEIGHT_UNIT=in`)   |
-| `USER_BIRTH_DATE` | Yes      | Date in YYYY-MM-DD format, age >= 5                  |
-| `USER_GENDER`     | Yes      | `male` or `female` (case-insensitive)                |
-| `USER_IS_ATHLETE` | Yes      | `true`/`false`/`yes`/`no`/`1`/`0`                    |
-| `WEIGHT_UNIT`     | No       | `kg` or `lbs` (default: `kg`) — display + scale input |
-| `HEIGHT_UNIT`     | No       | `cm` or `in` (default: `cm`) — for `USER_HEIGHT`    |
-| `SCALE_MAC`       | No       | MAC (`XX:XX:XX:XX:XX:XX`) or CoreBluetooth UUID (macOS) |
-| `NOBLE_DRIVER`    | No       | `abandonware` or `stoprocent` — override OS default noble driver |
-| `DRY_RUN`         | No       | `true` to skip exports (read scale + compute only) |
-| `CONTINUOUS_MODE` | No       | `true` to loop with auto-reconnect (default: `false`) |
-| `SCAN_COOLDOWN`   | No       | Seconds between scans in continuous mode (5–3600, default: `30`) |
+> **Recommended:** Set `scale_mac` to your scale's address. Without it, the app connects to the first recognized scale it finds — which could be a neighbor's scale, since BLE signals easily pass through walls.
 
 ### 2. Find your scale's MAC address (optional)
 
@@ -216,7 +269,7 @@ By default, the app auto-discovers your scale — no MAC address needed. If you 
 npm run scan
 ```
 
-This scans for nearby BLE devices for 15 seconds. Recognized scales are tagged with the adapter name (e.g. `[QN Scale]`, `[Xiaomi Mi Scale 2]`, `[Yunmai]`). Copy the MAC address into your `.env` file.
+This scans for nearby BLE devices for 15 seconds. Recognized scales are tagged with the adapter name (e.g. `[QN Scale]`, `[Xiaomi Mi Scale 2]`, `[Yunmai]`). Copy the address into `ble.scale_mac` in your `config.yaml`.
 
 > **Tip:** On macOS, BLE peripherals are identified by a CoreBluetooth UUID instead of a MAC address. The `npm run scan` output shows the correct identifier to use for `SCALE_MAC`.
 
@@ -226,78 +279,76 @@ This scans for nearby BLE devices for 15 seconds. Recognized scales are tagged w
 npm run setup-garmin
 ```
 
-This logs into Garmin using the credentials in your `.env` and stores authentication tokens locally (default: `~/.garmin_tokens/`). You only need to do this once — tokens are reused for subsequent syncs.
+This logs into Garmin using `GARMIN_EMAIL` and `GARMIN_PASSWORD` environment variables and stores authentication tokens locally (default: `~/.garmin_tokens/`). You only need to do this once — tokens are reused for subsequent syncs.
 
 > **If authentication fails:** Garmin may block requests from certain IPs (especially cloud/VPN IPs). Try running the setup from a different network, then copy the `~/.garmin_tokens/` directory to your target machine.
 
 ### 4. Exporters
 
-The app supports multiple export targets. Configure which ones to use with the `EXPORTERS` environment variable:
+Each exporter is configured as an entry in `global_exporters` (shared by all users) or per-user `exporters` (overrides global for that user). All enabled exporters run in parallel. The process reports an error only if every exporter fails.
 
-```ini
-EXPORTERS=garmin              # default — Garmin Connect only
-EXPORTERS=garmin,mqtt         # both in parallel
-EXPORTERS=webhook,influxdb    # HTTP + time-series DB
-EXPORTERS=garmin,ntfy         # Garmin + push notifications
-EXPORTERS=garmin,mqtt,webhook,influxdb,ntfy  # all five
-```
+#### Garmin Connect
 
-If `EXPORTERS` is not set, it defaults to `garmin`. All enabled exporters run in parallel.
+Uploads body composition to Garmin Connect via Python subprocess with saved tokens.
+
+| Field       | Required | Default               | Description                      |
+| ----------- | -------- | --------------------- | -------------------------------- |
+| `email`     | No       | `GARMIN_EMAIL` env    | Garmin account email             |
+| `password`  | No       | `GARMIN_PASSWORD` env | Garmin account password          |
+| `token_dir` | No       | `~/.garmin_tokens`    | Directory for cached auth tokens |
 
 #### MQTT
 
-Publishes the full body composition payload as a JSON object to the configured topic.
+Publishes the full body composition payload as JSON to the configured topic. **Home Assistant auto-discovery** is enabled by default — all 11 metrics appear as sensors grouped under a single device. Includes availability tracking (LWT), display precision per metric, and diagnostic entity categories.
 
-**Home Assistant auto-discovery** is enabled by default — all 11 metrics appear as sensors grouped under a single device in Home Assistant. No manual YAML configuration needed. Discovery includes availability tracking (online/offline via LWT), display precision per metric, diagnostic entity categories for impedance and physique rating, and the app version in the device info.
-
-| Variable | Required | Default | Description |
-| --- | --- | --- | --- |
-| `MQTT_BROKER_URL` | Yes (when mqtt enabled) | — | Broker connection URL (`mqtt://host:1883`) |
-| `MQTT_TOPIC` | No | `scale/body-composition` | Publish topic for measurement data |
-| `MQTT_QOS` | No | `1` | MQTT QoS level (0, 1, or 2) |
-| `MQTT_RETAIN` | No | `true` | Retain the last published message on the broker |
-| `MQTT_USERNAME` | No | — | Broker authentication username |
-| `MQTT_PASSWORD` | No | — | Broker authentication password |
-| `MQTT_CLIENT_ID` | No | `ble-scale-sync` | MQTT client identifier |
-| `MQTT_HA_DISCOVERY` | No | `true` | Publish Home Assistant auto-discovery configs on connect |
-| `MQTT_HA_DEVICE_NAME` | No | `BLE Scale` | Device name shown in Home Assistant |
+| Field            | Required | Default                  | Description                                           |
+| ---------------- | -------- | ------------------------ | ----------------------------------------------------- |
+| `broker_url`     | Yes      | —                        | Broker URL (`mqtt://host:1883` or `mqtts://` for TLS) |
+| `topic`          | No       | `scale/body-composition` | Publish topic                                         |
+| `qos`            | No       | `1`                      | QoS level (0, 1, or 2)                                |
+| `retain`         | No       | `true`                   | Retain last message on broker                         |
+| `username`       | No       | —                        | Broker auth username                                  |
+| `password`       | No       | —                        | Broker auth password                                  |
+| `client_id`      | No       | `ble-scale-sync`         | MQTT client identifier                                |
+| `ha_discovery`   | No       | `true`                   | Home Assistant auto-discovery                         |
+| `ha_device_name` | No       | `BLE Scale`              | Device name in Home Assistant                         |
 
 #### Webhook
 
-Sends the full body composition payload as a JSON POST to any HTTP endpoint. Useful for integrating with automation platforms (n8n, Make, Zapier, custom APIs).
+Sends the full body composition payload as JSON to any HTTP endpoint. Useful for automation platforms (n8n, Make, Zapier, custom APIs).
 
-| Variable | Required | Default | Description |
-| --- | --- | --- | --- |
-| `WEBHOOK_URL` | Yes (when webhook enabled) | — | Target URL |
-| `WEBHOOK_METHOD` | No | `POST` | HTTP method (`POST`, `PUT`, etc.) |
-| `WEBHOOK_HEADERS` | No | — | Custom headers as comma-separated `Key: Value` pairs |
-| `WEBHOOK_TIMEOUT` | No | `10000` | Request timeout in milliseconds |
+| Field     | Required | Default | Description                  |
+| --------- | -------- | ------- | ---------------------------- |
+| `url`     | Yes      | —       | Target URL                   |
+| `method`  | No       | `POST`  | HTTP method                  |
+| `headers` | No       | —       | Custom headers (YAML object) |
+| `timeout` | No       | `10000` | Request timeout in ms        |
 
 #### InfluxDB
 
-Writes body composition metrics to an InfluxDB v2 instance using line protocol. Float fields (`weight`, `bmi`, `bodyFatPercent`, `waterPercent`, `boneMass`, `muscleMass`) are written with 2 decimal places. Integer fields (`impedance`, `visceralFat`, `physiqueRating`, `bmr`, `metabolicAge`) use InfluxDB's integer type.
+Writes body composition metrics to InfluxDB v2 using line protocol. Float fields use 2 decimal places, integer fields use InfluxDB's `i` suffix.
 
-| Variable | Required | Default | Description |
-| --- | --- | --- | --- |
-| `INFLUXDB_URL` | Yes (when influxdb enabled) | — | InfluxDB server URL (`http://localhost:8086`) |
-| `INFLUXDB_TOKEN` | Yes (when influxdb enabled) | — | API token with write access |
-| `INFLUXDB_ORG` | Yes (when influxdb enabled) | — | Organization name |
-| `INFLUXDB_BUCKET` | Yes (when influxdb enabled) | — | Destination bucket |
-| `INFLUXDB_MEASUREMENT` | No | `body_composition` | Measurement name in line protocol |
+| Field         | Required | Default            | Description                 |
+| ------------- | -------- | ------------------ | --------------------------- |
+| `url`         | Yes      | —                  | InfluxDB server URL         |
+| `token`       | Yes      | —                  | API token with write access |
+| `org`         | Yes      | —                  | Organization name           |
+| `bucket`      | Yes      | —                  | Destination bucket          |
+| `measurement` | No       | `body_composition` | Measurement name            |
 
 #### Ntfy
 
-Sends a human-readable push notification via [ntfy](https://ntfy.sh). Works with the public ntfy.sh server or a self-hosted instance.
+Sends a human-readable push notification via [ntfy](https://ntfy.sh). Works with ntfy.sh or self-hosted.
 
-| Variable | Required | Default | Description |
-| --- | --- | --- | --- |
-| `NTFY_TOPIC` | Yes (when ntfy enabled) | — | Ntfy topic name |
-| `NTFY_URL` | No | `https://ntfy.sh` | Ntfy server URL |
-| `NTFY_TITLE` | No | `Scale Measurement` | Notification title |
-| `NTFY_PRIORITY` | No | `3` | Priority (1=min, 3=default, 5=max) |
-| `NTFY_TOKEN` | No | — | Bearer token for authentication |
-| `NTFY_USERNAME` | No | — | Username for Basic auth |
-| `NTFY_PASSWORD` | No | — | Password for Basic auth |
+| Field      | Required | Default             | Description         |
+| ---------- | -------- | ------------------- | ------------------- |
+| `url`      | No       | `https://ntfy.sh`   | Ntfy server URL     |
+| `topic`    | Yes      | —                   | Topic name          |
+| `title`    | No       | `Scale Measurement` | Notification title  |
+| `priority` | No       | `3`                 | Priority (1–5)      |
+| `token`    | No       | —                   | Bearer token auth   |
+| `username` | No       | —                   | Basic auth username |
+| `password` | No       | —                   | Basic auth password |
 
 ## Usage
 
@@ -375,10 +426,10 @@ Scales that provide their own body composition values (fat, water, muscle, bone)
 
 ### Branches
 
-| Branch | Purpose |
-| --- | --- |
-| `main` | Stable release branch |
-| `dev` | Active development — PRs and new features target this branch |
+| Branch | Purpose                                                      |
+| ------ | ------------------------------------------------------------ |
+| `main` | Stable release branch                                        |
+| `dev`  | Active development — PRs and new features target this branch |
 
 CI runs on both `main` and `dev` (push + pull request).
 
@@ -400,14 +451,19 @@ Checks `config.yaml` against the Zod schema and reports the number of users, exp
 Unit tests use [Vitest](https://vitest.dev/) and cover:
 
 - **Body composition math** — `body-comp-helpers.ts`
+- **Config schemas** — Zod validation, defaults, error formatting, slug generation
 - **Config loading** — YAML parsing, env reference resolution, config source detection, BLE config loader, env overrides
 - **Config resolution** — user profile resolution, runtime config extraction, exporter merging, single-user convenience
+- **Config writing** — atomic file write, write lock serialization, YAML comment preservation, debounced weight updates
+- **User matching** — 4-tier weight matching, all strategies (nearest/log/ignore), overlapping ranges, drift detection
 - **Environment validation** — `validate-env.ts` (all validation rules and edge cases)
 - **Scale adapters** — `parseNotification()`, `matches()`, `isComplete()`, `computeMetrics()`, and `onConnected()` for all 23 adapters
-- **Exporters** — config parsing, MQTT publish/HA discovery, Garmin subprocess, Webhook/InfluxDB/Ntfy delivery
+- **Exporters** — config parsing, MQTT publish/HA discovery, Garmin subprocess, Webhook/InfluxDB/Ntfy delivery, ExportContext
 - **Orchestrator** — healthcheck runner, export dispatch, parallel execution, partial/total failure handling
 - **BLE shared logic** — `waitForReading()` in legacy, onConnected, and multi-char modes; weight normalization; disconnect handling
-- **Utilities** — shared retry logic (`withRetry`), abort-signal sleep
+- **BLE utilities** — `formatMac()`, `normalizeUuid()`, `sleep()`, `withTimeout()`, abort signal handling
+- **Logger** — `createLogger()`, `setLogLevel()`
+- **Utilities** — shared retry logic (`withRetry`), error conversion (`errMsg`)
 
 ### Linting & Formatting
 
@@ -432,7 +488,9 @@ ble-scale-sync/
 │   │   ├── load.ts                 # Unified config loader (YAML + .env fallback)
 │   │   ├── resolve.ts              # Config → runtime types (UserProfile, exporters, etc.)
 │   │   ├── validate-cli.ts         # CLI entry point for npm run validate
-│   │   └── slugify.ts              # Slug generation + uniqueness validation
+│   │   ├── slugify.ts              # Slug generation + uniqueness validation
+│   │   ├── user-matching.ts       # Weight-based multi-user matching (4-tier)
+│   │   └── write.ts               # Atomic YAML write + debounced weight updates
 │   ├── ble/
 │   │   ├── index.ts                # OS detection + dynamic import barrel
 │   │   ├── types.ts                # ScanOptions, ScanResult, constants, utilities
@@ -486,11 +544,15 @@ ble-scale-sync/
 ├── tests/
 │   ├── body-comp-helpers.test.ts   # Body-comp helper unit tests
 │   ├── validate-env.test.ts        # .env validation unit tests
+│   ├── orchestrator.test.ts        # Healthcheck + export dispatch tests
+│   ├── logger.test.ts              # Logger utility tests
 │   ├── helpers/
 │   │   └── scale-test-utils.ts     # Shared test utilities (mock peripheral, etc.)
+│   ├── config/                     # Config tests (schema, slugify, load, resolve, write, matching)
+│   ├── ble/                        # BLE tests (shared logic, utilities, abort signal)
 │   ├── utils/                      # Utility tests (retry, error)
 │   ├── scales/                     # One test file per adapter (23 files)
-│   └── exporters/                  # Exporter tests (config, garmin, mqtt, webhook, influxdb, ntfy)
+│   └── exporters/                  # Exporter tests (config, garmin, mqtt, webhook, influxdb, ntfy, context)
 ├── garmin-scripts/
 │   ├── garmin_upload.py            # Garmin uploader (JSON stdin → JSON stdout)
 │   └── setup_garmin.py             # One-time Garmin auth setup
@@ -521,14 +583,59 @@ To support a new scale brand, create a class that implements `ScaleAdapter` in `
 To add a new export target:
 
 1. Create `src/exporters/your-exporter.ts` implementing the `Exporter` interface from `src/interfaces/exporter.ts`
-2. Add the name to the `ExporterName` type and env parsing in `src/exporters/config.ts`
-3. Add the factory case in `src/exporters/index.ts` → `createExporters()`
-4. Add tests in `tests/exporters/`
-5. Document config variables in `.env.example`
+   - Export an `ExporterSchema` describing fields, display info, and `supportsGlobal`/`supportsPerUser`
+   - Accept optional `ExportContext` in `export(data, context?)` for multi-user support
+2. Add the name to the `ExporterName` type and `KNOWN_EXPORTERS` set in `src/exporters/config.ts`
+3. Add env var parsing in `src/exporters/config.ts` (for `.env` fallback path)
+4. Add a case to the switch in `createExporters()` in `src/exporters/index.ts`
+5. Add a registry entry in `src/exporters/registry.ts` with `{ schema, factory }`
+6. Add tests in `tests/exporters/` (including `ExportContext` behavior)
+7. Document config fields in this README and `.env.example`
+
+## Multi-User Weight Matching
+
+When using `config.yaml` with multiple users, the app automatically identifies who stepped on the scale based on the measured weight. Each user defines a `weight_range` in their config:
+
+```yaml
+users:
+  - name: Alice
+    weight_range:
+      min: 50
+      max: 70
+    last_known_weight: null
+  - name: Bob
+    weight_range:
+      min: 75
+      max: 100
+    last_known_weight: 85.5
+```
+
+### Matching Priority (4 tiers)
+
+1. **Single user** — always matches (warns if weight is outside the configured range)
+2. **Exact range match** — one user's range contains the weight
+3. **Overlapping ranges** — multiple users match; tiebreak by `last_known_weight` proximity, then config order
+4. **No range match** — matches the user with the closest `last_known_weight`
+
+If none of the above produce a match, the `unknown_user` strategy applies:
+
+| Strategy            | Behavior                                                                      |
+| ------------------- | ----------------------------------------------------------------------------- |
+| `nearest` (default) | Picks the user whose range midpoint is closest to the weight (with a warning) |
+| `log`               | Logs a warning and skips the measurement                                      |
+| `ignore`            | Silently skips the measurement                                                |
+
+### Drift Detection
+
+After matching, the app checks if the weight falls in the outer 10% of the user's range and logs a warning. This helps you notice when a user's typical weight is drifting toward a range boundary, so you can adjust the config before mismatches occur.
+
+### Automatic Weight Tracking
+
+After each successful measurement, the user's `last_known_weight` is automatically updated in `config.yaml`. This improves future matching accuracy for overlapping ranges. Updates are debounced (5 seconds) and skipped if the change is less than 0.5 kg.
 
 ## Athlete Mode
 
-Setting `USER_IS_ATHLETE=true` in `.env` adjusts the calculation constants for people who exercise regularly. This affects:
+Setting `is_athlete: true` in `config.yaml` (or `USER_IS_ATHLETE=true` in `.env`) adjusts the calculation constants for people who exercise regularly. This affects:
 
 - **Lean Body Mass** coefficients (higher lean mass estimation)
 - **Water percentage** (athletes have higher hydration: 74% vs 73% of LBM)
@@ -538,10 +645,12 @@ Setting `USER_IS_ATHLETE=true` in `.env` adjusts the calculation constants for p
 
 ## Token Storage
 
-By default, Garmin tokens are stored in `~/.garmin_tokens/`. You can change this by setting `TOKEN_DIR` in your `.env`:
+By default, Garmin tokens are stored in `~/.garmin_tokens/`. You can change this with the `token_dir` field in the Garmin exporter config:
 
-```ini
-TOKEN_DIR=/custom/path/to/tokens
+```yaml
+global_exporters:
+  - type: garmin
+    token_dir: /custom/path/to/tokens
 ```
 
 ## Troubleshooting
@@ -586,7 +695,7 @@ sudo setcap cap_net_raw+eip $(eval readlink -f $(which node))
 ### Garmin upload fails
 
 - Re-run `npm run setup-garmin` to refresh tokens.
-- Check that your Garmin credentials in `.env` are correct.
+- Check that your Garmin credentials are correct (in `config.yaml` or environment variables).
 - If you're behind a VPN or on a restricted network, try authenticating from a different connection.
 
 ### Debug BLE output
@@ -623,11 +732,11 @@ Low-level Bluetooth communication is provided by [**node-ble**](https://github.c
 
 ### Body Composition Formulas
 
-| Formula | Authors | Used For |
-| --- | --- | --- |
-| **BIA** (Bioelectrical Impedance Analysis) | Lukaski H.C. et al. (1986) — *"Assessment of fat-free mass using bioelectrical impedance measurements of the human body"*, American Journal of Clinical Nutrition | Body fat % from impedance — the core algorithm |
-| **Mifflin-St Jeor** | Mifflin M.D., St Jeor S.T. et al. (1990) — *"A new predictive equation for resting energy expenditure in healthy individuals"*, American Journal of Clinical Nutrition | Basal Metabolic Rate (BMR) |
-| **Deurenberg** | Deurenberg P., Weststrate J.A., Seidell J.C. (1991) — *"Body mass index as a measure of body fatness: age- and sex-specific prediction formulas"*, British Journal of Nutrition | Body fat % fallback when impedance is unavailable |
+| Formula                                    | Authors                                                                                                                                                                         | Used For                                          |
+| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------- |
+| **BIA** (Bioelectrical Impedance Analysis) | Lukaski H.C. et al. (1986) — _"Assessment of fat-free mass using bioelectrical impedance measurements of the human body"_, American Journal of Clinical Nutrition               | Body fat % from impedance — the core algorithm    |
+| **Mifflin-St Jeor**                        | Mifflin M.D., St Jeor S.T. et al. (1990) — _"A new predictive equation for resting energy expenditure in healthy individuals"_, American Journal of Clinical Nutrition          | Basal Metabolic Rate (BMR)                        |
+| **Deurenberg**                             | Deurenberg P., Weststrate J.A., Seidell J.C. (1991) — _"Body mass index as a measure of body fatness: age- and sex-specific prediction formulas"_, British Journal of Nutrition | Body fat % fallback when impedance is unavailable |
 
 ## License
 
