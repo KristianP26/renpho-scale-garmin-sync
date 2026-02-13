@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { formatMac, normalizeUuid, sleep, withTimeout, BT_BASE_UUID_SUFFIX } from '../../src/ble/types.js';
+import {
+  formatMac,
+  normalizeUuid,
+  sleep,
+  withTimeout,
+  BT_BASE_UUID_SUFFIX,
+} from '../../src/ble/types.js';
 
 describe('formatMac()', () => {
   it('formats a lowercase MAC with colons', () => {
