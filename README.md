@@ -3,8 +3,10 @@
 ![CI](https://github.com/KristianP26/ble-scale-sync/actions/workflows/ci.yml/badge.svg)
 ![GitHub Release](https://img.shields.io/github/v/release/KristianP26/ble-scale-sync)
 ![License: GPL-3.0](https://img.shields.io/github/license/KristianP26/ble-scale-sync)
-![Node.js](https://img.shields.io/badge/node-%3E%3D20-brightgreen)
-![Docker](https://img.shields.io/badge/docker-ghcr.io-blue)
+![TypeScript](https://img.shields.io/badge/typescript-%3E%3D5-blue?logo=typescript&logoColor=white)
+![Node.js](https://img.shields.io/badge/node-%3E%3D20-brightgreen?logo=node.js&logoColor=white)
+![Docker](https://img.shields.io/badge/docker-ghcr.io-blue?logo=docker&logoColor=white)
+![Platform](https://img.shields.io/badge/platform-linux%20%7C%20macos%20%7C%20windows-lightgrey)
 
 A cross-platform CLI tool that reads body composition data from a **BLE smart scale** and exports it to multiple targets. Supports **23 scale brands** out of the box, works on **Linux** (including Raspberry Pi), **macOS**, and **Windows**.
 
