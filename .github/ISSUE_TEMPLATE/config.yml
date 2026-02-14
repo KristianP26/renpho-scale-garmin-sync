@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Documentation
+    url: https://blescalesync.dev
+    about: Check the docs before opening an issue
+  - name: Troubleshooting
+    url: https://blescalesync.dev/troubleshooting
+    about: Common issues and solutions

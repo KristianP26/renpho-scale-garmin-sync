@@ -1,4 +1,8 @@
 import { defineConfig } from 'vitepress';
+import { createRequire } from 'module';
+
+const require = createRequire(import.meta.url);
+const pkg = require('../../package.json');
 
 export default defineConfig({
   title: 'BLE Scale Sync',
@@ -37,6 +41,10 @@ export default defineConfig({
       { text: 'Guide', link: '/guide/getting-started' },
       { text: 'Exporters', link: '/exporters' },
       { text: 'Changelog', link: '/changelog' },
+      {
+        text: `v${pkg.version}`,
+        link: `https://github.com/KristianP26/ble-scale-sync/releases/tag/v${pkg.version}`,
+      },
     ],
 
     sidebar: [

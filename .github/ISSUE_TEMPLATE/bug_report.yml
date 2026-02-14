@@ -1,0 +1,70 @@
+name: Bug Report
+description: Report a bug or unexpected behavior
+labels: ["bug"]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: What happened? What did you expect?
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to Reproduce
+      description: How can we reproduce the issue?
+      placeholder: |
+        1. Configure with ...
+        2. Run `npm start`
+        3. Step on scale
+        4. See error ...
+    validations:
+      required: true
+
+  - type: input
+    id: scale
+    attributes:
+      label: Scale Brand / Model
+      placeholder: e.g. Renpho ES-CS20M, Xiaomi Mi Scale 2
+    validations:
+      required: false
+
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - Linux (Raspberry Pi)
+        - Linux (other)
+        - Windows
+        - macOS
+        - Docker
+    validations:
+      required: true
+
+  - type: input
+    id: node-version
+    attributes:
+      label: Node.js Version
+      placeholder: e.g. 20.11.0 (run `node -v`)
+    validations:
+      required: true
+
+  - type: input
+    id: app-version
+    attributes:
+      label: App Version
+      placeholder: e.g. v1.2.2 (from package.json or Docker tag)
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Debug Logs
+      description: Run with `DEBUG=true npm start` and paste relevant output
+      render: shell
+    validations:
+      required: false
