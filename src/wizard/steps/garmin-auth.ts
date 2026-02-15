@@ -38,10 +38,32 @@ function getUsersWithGarmin(ctx: WizardContext): GarminUser[] {
   return results;
 }
 
-function runSetupGarmin(pythonCmd: string): Promise<boolean> {
+function runSetupGarmin(
+  pythonCmd: string,
+  email?: string,
+  password?: string,
+  tokenDir?: string,
+): Promise<boolean> {
   return new Promise((resolve) => {
     const scriptPath = join(ROOT, 'garmin-scripts', 'setup_garmin.py');
-    const proc = spawn(pythonCmd, [scriptPath], {
+    const args: string[] = [scriptPath];
+
+    if (email) {
+      args.push('--email', email);
+    }
+    if (password) {
+      args.push('--password', password);
+    }
+    if (tokenDir) {
+      // Expand ~ to home directory
+      const expandedTokenDir = tokenDir.replace(
+        /^~/,
+        process.env.HOME || process.env.USERPROFILE || '',
+      );
+      args.push('--token-dir', expandedTokenDir);
+    }
+
+    const proc = spawn(pythonCmd, args, {
       stdio: 'inherit',
       timeout: 120_000,
     });
@@ -82,7 +104,7 @@ export const garminAuthStep: WizardStep = {
     }
 
     // Per-user auth loop
-    for (const { userName } of garminUsers) {
+    for (const { userName, entry } of garminUsers) {
       const runAuth = await ctx.prompts.confirm(
         `Run Garmin auth for ${userName}? (requires email + password)`,
         { default: true },
@@ -93,16 +115,29 @@ export const garminAuthStep: WizardStep = {
         continue;
       }
 
+      // Extract credentials and token_dir from the entry
+      const entryRecord = entry as Record<string, unknown>;
+      const email = entryRecord.email as string | undefined;
+      const password = entryRecord.password as string | undefined;
+      const tokenDir = entryRecord.token_dir as string | undefined;
+
+      if (!email || !password) {
+        console.log(
+          `\n  ${error(`Garmin auth failed for ${userName}: email and password are required in config.`)}`,
+        );
+        continue;
+      }
+
       console.log(`\n  Running Garmin setup for ${userName}...\n`);
 
-      let authOk = await runSetupGarmin(ctx.platform.pythonCommand);
+      let authOk = await runSetupGarmin(ctx.platform.pythonCommand, email, password, tokenDir);
 
       if (!authOk) {
         const retry = await ctx.prompts.confirm(`Garmin auth failed for ${userName}. Retry?`, {
           default: true,
         });
         if (retry) {
-          authOk = await runSetupGarmin(ctx.platform.pythonCommand);
+          authOk = await runSetupGarmin(ctx.platform.pythonCommand, email, password, tokenDir);
         }
       }
 

@@ -37,13 +37,29 @@ export function _resetPythonCache(): void {
   cachedPython = undefined;
 }
 
-function uploadToGarmin(payload: BodyComposition, pythonCmd: string): Promise<ExportResult> {
+function uploadToGarmin(
+  payload: BodyComposition,
+  pythonCmd: string,
+  tokenDir?: string,
+): Promise<ExportResult> {
   return new Promise<ExportResult>((resolve, reject) => {
     const scriptPath: string = join(ROOT, 'garmin-scripts', 'garmin_upload.py');
-    const py = spawn(pythonCmd, [scriptPath], {
+    const args: string[] = [scriptPath];
+
+    if (tokenDir) {
+      args.push('--token-dir', tokenDir);
+    }
+
+    const env: NodeJS.ProcessEnv = { ...process.env };
+    if (tokenDir) {
+      env.TOKEN_DIR = tokenDir;
+    }
+
+    const py = spawn(pythonCmd, args, {
       stdio: ['pipe', 'pipe', 'inherit'],
       cwd: ROOT,
       timeout: SUBPROCESS_TIMEOUT_MS,
+      env,
     });
 
     const chunks: Buffer[] = [];
@@ -133,9 +149,14 @@ export class GarminExporter implements Exporter {
   async export(data: BodyComposition, _context?: ExportContext): Promise<ExportResult> {
     const pythonCmd = await findPython();
 
+    // Expand ~ to home directory if present
+    const tokenDir = this.entryConfig.token_dir
+      ? this.entryConfig.token_dir.replace(/^~/, process.env.HOME || process.env.USERPROFILE || '')
+      : undefined;
+
     return withRetry(
       async () => {
-        const result = await uploadToGarmin(data, pythonCmd);
+        const result = await uploadToGarmin(data, pythonCmd, tokenDir);
         if (result.success) log.info('Garmin upload succeeded.');
         return result;
       },

@@ -1,3 +1,4 @@
+import argparse
 import os
 import sys
 from pathlib import Path
@@ -15,7 +16,9 @@ FAKE_USER_AGENT = (
 )
 
 
-def get_token_dir():
+def get_token_dir(token_dir=None):
+    if token_dir:
+        return str(Path(token_dir).expanduser())
     custom = os.environ.get("TOKEN_DIR", "").strip()
     if custom:
         return str(Path(custom).expanduser())
@@ -26,17 +29,43 @@ def get_token_dir():
     return str(new)
 
 
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description="Setup Garmin Connect authentication"
+    )
+    parser.add_argument(
+        "--email",
+        help="Garmin account email (or set GARMIN_EMAIL env var)",
+    )
+    parser.add_argument(
+        "--password",
+        help="Garmin account password (or set GARMIN_PASSWORD env var)",
+    )
+    parser.add_argument(
+        "--token-dir",
+        help="Directory for storing auth tokens (or set TOKEN_DIR env var, default: ~/.garmin_tokens)",
+    )
+    return parser.parse_args()
+
+
 def main():
-    email = os.environ.get("GARMIN_EMAIL", "").strip()
-    password = os.environ.get("GARMIN_PASSWORD", "").strip()
+    args = parse_args()
+
+    # Get credentials from CLI args or env vars (CLI args take precedence)
+    email = (args.email or os.environ.get("GARMIN_EMAIL", "")).strip()
+    password = (args.password or os.environ.get("GARMIN_PASSWORD", "")).strip()
 
     if not email or not password:
         print(
-            "GARMIN_EMAIL and GARMIN_PASSWORD must be set in your .env file."
+            "Error: GARMIN_EMAIL and GARMIN_PASSWORD must be provided.\n\n"
+            "Usage:\n"
+            "  setup_garmin.py --email user@example.com --password mypass\n"
+            "  # OR set environment variables:\n"
+            "  GARMIN_EMAIL=user@example.com GARMIN_PASSWORD=mypass setup_garmin.py"
         )
         sys.exit(1)
 
-    token_dir = get_token_dir()
+    token_dir = get_token_dir(args.token_dir)
     print(f"[Setup] Authenticating as {email}...")
 
     try:

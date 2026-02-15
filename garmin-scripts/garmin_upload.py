@@ -1,3 +1,4 @@
+import argparse
 import json
 import os
 import sys
@@ -20,7 +21,9 @@ def log(msg):
     print(msg, file=sys.stderr)
 
 
-def get_token_dir():
+def get_token_dir(token_dir=None):
+    if token_dir:
+        return str(Path(token_dir).expanduser())
     custom = os.environ.get("TOKEN_DIR", "").strip()
     if custom:
         return str(Path(custom).expanduser())
@@ -31,8 +34,8 @@ def get_token_dir():
     return str(new)
 
 
-def get_garmin_client():
-    token_dir = get_token_dir()
+def get_garmin_client(token_dir=None):
+    token_dir = get_token_dir(token_dir)
     log(f"[Garmin] Loading tokens from {token_dir}")
 
     if not os.path.isdir(token_dir):
@@ -48,8 +51,8 @@ def get_garmin_client():
     return garmin
 
 
-def upload(payload):
-    garmin = get_garmin_client()
+def upload(payload, token_dir=None):
+    garmin = get_garmin_client(token_dir)
 
     log("[Garmin] Uploading body composition...")
     garmin.add_body_composition(
@@ -75,7 +78,20 @@ def upload(payload):
     }
 
 
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description="Upload body composition to Garmin Connect"
+    )
+    parser.add_argument(
+        "--token-dir",
+        help="Directory containing auth tokens (or set TOKEN_DIR env var, default: ~/.garmin_tokens)",
+    )
+    return parser.parse_args()
+
+
 def main():
+    args = parse_args()
+
     try:
         raw = sys.stdin.read()
         payload = json.loads(raw)
@@ -85,7 +101,7 @@ def main():
         sys.exit(1)
 
     try:
-        data = upload(payload)
+        data = upload(payload, args.token_dir)
         print(json.dumps({"success": True, "data": data}))
         sys.exit(0)
     except Exception as e:

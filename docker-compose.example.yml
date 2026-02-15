@@ -22,7 +22,11 @@ services:
       # D-Bus socket (required for BlueZ communication)
       - /var/run/dbus:/var/run/dbus:ro
       # Garmin auth tokens (persisted across container restarts)
+      # For single-user setups:
       - garmin-tokens:/home/node/.garmin_tokens
+      # For multi-user setups, uncomment and use separate volumes:
+      # - garmin-tokens-alice:/home/node/.garmin_tokens_alice
+      # - garmin-tokens-bob:/home/node/.garmin_tokens_bob
 
     environment:
       - CONTINUOUS_MODE=true
@@ -41,3 +45,6 @@ services:
 
 volumes:
   garmin-tokens:
+  # Uncomment for multi-user setups:
+  # garmin-tokens-alice:
+  # garmin-tokens-bob:
