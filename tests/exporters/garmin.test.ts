@@ -128,4 +128,94 @@ describe('GarminExporter', () => {
     // Second spawn call should use 'python' (fallback)
     expect(mockSpawn.mock.calls[1][0]).toBe('python');
   });
+
+  it('passes token_dir as --token-dir to Python subprocess', async () => {
+    const uploadResult = JSON.stringify({ success: true, data: { weight: 80 } });
+
+    mockSpawn.mockImplementation((_cmd: string, args: string[]) => {
+      if (args[0] === '--version') return createVersionCheckProc(0);
+      return createUploadProc(uploadResult, 0);
+    });
+
+    const { GarminExporter } = await import('../../src/exporters/garmin.js');
+    const exporter = new GarminExporter({ token_dir: '/custom/token/path' });
+    const result = await exporter.export(samplePayload);
+
+    expect(result.success).toBe(true);
+    const uploadCall = mockSpawn.mock.calls[1];
+    expect(uploadCall[1]).toContain('--token-dir');
+    expect(uploadCall[1]).toContain('/custom/token/path');
+  });
+
+  it('expands ~ in token_dir using HOME', async () => {
+    const uploadResult = JSON.stringify({ success: true });
+
+    mockSpawn.mockImplementation((_cmd: string, args: string[]) => {
+      if (args[0] === '--version') return createVersionCheckProc(0);
+      return createUploadProc(uploadResult, 0);
+    });
+
+    const originalHome = process.env.HOME;
+    process.env.HOME = '/test/home';
+
+    try {
+      const { GarminExporter } = await import('../../src/exporters/garmin.js');
+      const exporter = new GarminExporter({ token_dir: '~/my-tokens' });
+      const result = await exporter.export(samplePayload);
+
+      expect(result.success).toBe(true);
+      const uploadCall = mockSpawn.mock.calls[1];
+      const tokenDirIndex = (uploadCall[1] as string[]).indexOf('--token-dir');
+      expect(tokenDirIndex).toBeGreaterThan(-1);
+      expect(uploadCall[1][tokenDirIndex + 1]).toBe('/test/home/my-tokens');
+    } finally {
+      if (originalHome !== undefined) {
+        process.env.HOME = originalHome;
+      } else {
+        delete process.env.HOME;
+      }
+    }
+  });
+
+  it('returns error when tilde expansion fails (no HOME or USERPROFILE)', async () => {
+    const uploadResult = JSON.stringify({ success: true });
+
+    mockSpawn.mockImplementation((_cmd: string, args: string[]) => {
+      if (args[0] === '--version') return createVersionCheckProc(0);
+      return createUploadProc(uploadResult, 0);
+    });
+
+    const originalHome = process.env.HOME;
+    const originalUserProfile = process.env.USERPROFILE;
+    delete process.env.HOME;
+    delete process.env.USERPROFILE;
+
+    try {
+      const { GarminExporter } = await import('../../src/exporters/garmin.js');
+      const exporter = new GarminExporter({ token_dir: '~/my-tokens' });
+      const result = await exporter.export(samplePayload);
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('Cannot expand ~');
+    } finally {
+      if (originalHome !== undefined) process.env.HOME = originalHome;
+      if (originalUserProfile !== undefined) process.env.USERPROFILE = originalUserProfile;
+    }
+  });
+
+  it('does not pass --token-dir when token_dir is not set (backward compat)', async () => {
+    const uploadResult = JSON.stringify({ success: true });
+
+    mockSpawn.mockImplementation((_cmd: string, args: string[]) => {
+      if (args[0] === '--version') return createVersionCheckProc(0);
+      return createUploadProc(uploadResult, 0);
+    });
+
+    const { GarminExporter } = await import('../../src/exporters/garmin.js');
+    const exporter = new GarminExporter();
+    const result = await exporter.export(samplePayload);
+
+    expect(result.success).toBe(true);
+    const uploadCall = mockSpawn.mock.calls[1];
+    expect(uploadCall[1]).not.toContain('--token-dir');
+  });
 });

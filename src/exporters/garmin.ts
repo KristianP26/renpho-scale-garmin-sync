@@ -37,10 +37,30 @@ export function _resetPythonCache(): void {
   cachedPython = undefined;
 }
 
-function uploadToGarmin(payload: BodyComposition, pythonCmd: string): Promise<ExportResult> {
+function expandTilde(path: string): string {
+  if (!path.startsWith('~')) return path;
+  const home = process.env.HOME || process.env.USERPROFILE;
+  if (!home) throw new Error('Cannot expand ~: HOME and USERPROFILE are both undefined');
+  return path.replace(/^~/, home);
+}
+
+/** @internal Exported for testing only. */
+export { expandTilde as _expandTilde };
+
+function uploadToGarmin(
+  payload: BodyComposition,
+  pythonCmd: string,
+  tokenDir?: string,
+): Promise<ExportResult> {
   return new Promise<ExportResult>((resolve, reject) => {
     const scriptPath: string = join(ROOT, 'garmin-scripts', 'garmin_upload.py');
-    const py = spawn(pythonCmd, [scriptPath], {
+    const args: string[] = [scriptPath];
+
+    if (tokenDir) {
+      args.push('--token-dir', expandTilde(tokenDir));
+    }
+
+    const py = spawn(pythonCmd, args, {
       stdio: ['pipe', 'pipe', 'inherit'],
       cwd: ROOT,
       timeout: SUBPROCESS_TIMEOUT_MS,
@@ -135,7 +155,7 @@ export class GarminExporter implements Exporter {
 
     return withRetry(
       async () => {
-        const result = await uploadToGarmin(data, pythonCmd);
+        const result = await uploadToGarmin(data, pythonCmd, this.entryConfig.token_dir);
         if (result.success) log.info('Garmin upload succeeded.');
         return result;
       },

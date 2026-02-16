@@ -35,19 +35,50 @@ global_exporters:
 ```
 
 ::: tip Authentication
-The setup wizard handles Garmin authentication automatically. You only need to authenticate once — tokens are cached in `~/.garmin_tokens/` and reused. To re-authenticate manually:
-```bash
-# Docker
-docker run --rm -it -v ./config.yaml:/app/config.yaml \
-  ghcr.io/kristianp26/ble-scale-sync:latest setup-garmin
+The setup wizard handles Garmin authentication automatically. You only need to authenticate once — tokens are cached and reused. To re-authenticate manually:
 
-# Native
+**Native:**
+
+```bash
 npm run setup-garmin
 ```
+
+**Docker (single user with env vars):**
+
+```bash
+docker run --rm -it \
+  -v ./config.yaml:/app/config.yaml \
+  -v garmin-tokens:/home/node/.garmin_tokens \
+  -e GARMIN_EMAIL \
+  -e GARMIN_PASSWORD \
+  ghcr.io/kristianp26/ble-scale-sync:latest setup-garmin
+```
+
+**Docker (specific user from config.yaml):**
+
+```bash
+docker run --rm -it \
+  -v ./config.yaml:/app/config.yaml \
+  -v garmin-tokens-alice:/home/node/.garmin_tokens_alice \
+  -e GARMIN_EMAIL -e GARMIN_PASSWORD \
+  ghcr.io/kristianp26/ble-scale-sync:latest setup-garmin --user Alice
+```
+
+**Docker (all users from config.yaml):**
+
+```bash
+docker run --rm -it \
+  -v ./config.yaml:/app/config.yaml \
+  -v garmin-tokens-alice:/home/node/.garmin_tokens_alice \
+  -v garmin-tokens-bob:/home/node/.garmin_tokens_bob \
+  -e GARMIN_EMAIL -e GARMIN_PASSWORD \
+  ghcr.io/kristianp26/ble-scale-sync:latest setup-garmin --all-users
+```
+
 :::
 
 ::: warning IP blocking
-Garmin may block requests from cloud/VPN IPs. If authentication fails, try from a different network, then copy `~/.garmin_tokens/` to your target machine.
+Garmin may block requests from cloud/VPN IPs. If authentication fails, try from a different network, then copy the token directory to your target machine.
 :::
 
 ## MQTT {#mqtt}
