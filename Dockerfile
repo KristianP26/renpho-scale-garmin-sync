@@ -57,6 +57,8 @@ COPY docker-entrypoint.sh ./
 RUN chmod +x docker-entrypoint.sh
 
 # Non-root user (UID 1000 from node:20-alpine)
+# chown /app so the node user can create .tmp files for atomic config writes
+RUN chown node:node /app
 USER node
 
 # Heartbeat check: /tmp/.ble-scale-sync-heartbeat must be updated within 5 minutes
