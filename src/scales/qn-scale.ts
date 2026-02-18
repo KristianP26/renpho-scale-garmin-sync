@@ -109,7 +109,12 @@ export class QnScaleAdapter implements ScaleAdapter {
 
     // Fallback: match by AABB manufacturer data marker (broadcast-only devices)
     const mfg = device.manufacturerData;
-    if (mfg && mfg.length >= QN_BROADCAST_MIN_LEN && mfg[2] === QN_MARKER_0 && mfg[3] === QN_MARKER_1) {
+    if (
+      mfg &&
+      mfg.length >= QN_BROADCAST_MIN_LEN &&
+      mfg[2] === QN_MARKER_0 &&
+      mfg[3] === QN_MARKER_1
+    ) {
       return true;
     }
 
@@ -209,9 +214,8 @@ export class QnScaleAdapter implements ScaleAdapter {
 
   computeMetrics(reading: ScaleReading, profile: UserProfile): BodyComposition {
     // In broadcast mode impedance is 0 — skip BIA, let buildPayload use Deurenberg fallback
-    const fat = reading.impedance > 0
-      ? computeBiaFat(reading.weight, reading.impedance, profile)
-      : undefined;
+    const fat =
+      reading.impedance > 0 ? computeBiaFat(reading.weight, reading.impedance, profile) : undefined;
     return buildPayload(reading.weight, reading.impedance, { fat }, profile);
   }
 }
