@@ -15,6 +15,8 @@ import {
   DISCOVERY_TIMEOUT_MS,
   DISCOVERY_POLL_MS,
   POST_DISCOVERY_QUIESCE_MS,
+  ADAPTER_POWER_CYCLE_DELAY_MS,
+  ADAPTER_SETTLE_TIMEOUT_MS,
   GATT_DISCOVERY_TIMEOUT_MS,
 } from './types.js';
 
@@ -82,7 +84,13 @@ async function startDiscoverySafe(btAdapter: Adapter): Promise<boolean> {
   } catch (e) {
     bleLog.debug(`D-Bus StopDiscovery failed: ${errMsg(e)}`);
   }
-  await sleep(1000);
+  await sleep(ADAPTER_POWER_CYCLE_DELAY_MS);
+
+  // BlueZ may have auto-started discovery after the StopDiscovery attempt
+  if (await btAdapter.isDiscovering()) {
+    bleLog.debug('Discovery active after StopDiscovery attempt, continuing');
+    return true;
+  }
 
   try {
     await btAdapter.startDiscovery();
@@ -99,18 +107,36 @@ async function startDiscoverySafe(btAdapter: Adapter): Promise<boolean> {
     const helper = (btAdapter as any).helper;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { Variant } = (await import('dbus-next')) as any;
-    await helper.set('Powered', new Variant('b', false));
-    bleLog.debug('Adapter powered off');
-    await sleep(1000);
-    await helper.set('Powered', new Variant('b', true));
-    bleLog.debug('Adapter powered on');
-    await sleep(1000);
+    try {
+      await helper.set('Powered', new Variant('b', false));
+      bleLog.debug('Adapter powered off');
+      await sleep(ADAPTER_POWER_CYCLE_DELAY_MS);
+      await helper.set('Powered', new Variant('b', true));
+      bleLog.debug('Adapter powered on');
+      await sleep(ADAPTER_POWER_CYCLE_DELAY_MS);
+    } catch (e) {
+      // Adapter may be busy (e.g. "Busy") — wait for it to settle
+      bleLog.debug(`Adapter power set failed: ${errMsg(e)}, waiting for adapter to settle...`);
+      await sleep(ADAPTER_SETTLE_TIMEOUT_MS);
+    }
+
+    // Check if discovery is already active after the power cycle attempt
+    if (await btAdapter.isDiscovering()) {
+      bleLog.debug('Discovery active after power cycle, continuing');
+      return true;
+    }
 
     await btAdapter.startDiscovery();
     bleLog.debug('Discovery started after power cycle');
     return true;
   } catch (e) {
     bleLog.debug(`Power cycle / startDiscovery failed: ${errMsg(e)}`);
+  }
+
+  // 4. Final isDiscovering check — adapter may be discovering despite all errors
+  if (await btAdapter.isDiscovering()) {
+    bleLog.debug('Discovery active (final check), continuing');
+    return true;
   }
 
   // All strategies failed — warn but don't throw
@@ -338,9 +364,9 @@ export async function scanAndReadRaw(opts: ScanOptions): Promise<RawReading> {
   }
 
   let device: Device | null = null;
+  let btAdapter: Adapter | null = null;
 
   try {
-    let btAdapter: Adapter;
     try {
       btAdapter = await bluetooth.defaultAdapter();
     } catch (err) {
@@ -481,6 +507,16 @@ export async function scanAndReadRaw(opts: ScanOptions): Promise<RawReading> {
     }
     return raw;
   } finally {
+    // Best-effort stop discovery before destroying the D-Bus connection.
+    // Without this, BlueZ may retain an orphaned discovery session which causes
+    // "Operation already in progress" on the next scan cycle.
+    if (btAdapter) {
+      try {
+        await btAdapter.stopDiscovery();
+      } catch {
+        /* ignore — may already be stopped */
+      }
+    }
     destroy();
   }
 }

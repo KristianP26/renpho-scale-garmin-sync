@@ -18,6 +18,12 @@ export const GATT_DISCOVERY_TIMEOUT_MS = 30_000;
 /** Delay after stopping BlueZ discovery to let the radio quiesce before connecting. */
 export const POST_DISCOVERY_QUIESCE_MS = 500;
 
+/** Delay between steps during adapter power cycle (power-off → power-on → start). */
+export const ADAPTER_POWER_CYCLE_DELAY_MS = 2000;
+
+/** How long to wait for a "Busy" adapter to settle before retrying discovery. */
+export const ADAPTER_SETTLE_TIMEOUT_MS = 3000;
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export interface ScanOptions {
