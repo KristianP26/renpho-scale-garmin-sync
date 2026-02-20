@@ -1,5 +1,6 @@
 import type { WizardStep, WizardContext } from '../types.js';
-import { success, warn } from '../ui.js';
+import type { MqttProxyConfig } from '../../config/schema.js';
+import { success, warn, info } from '../ui.js';
 
 const MAC_REGEX = /^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$/;
 const UUID_REGEX = /^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$/;
@@ -11,6 +12,47 @@ function validateMac(v: string): string | true {
   return true;
 }
 
+function validateBrokerUrl(v: string): string | true {
+  if (!v.startsWith('mqtt://') && !v.startsWith('mqtts://')) {
+    return 'Must start with mqtt:// or mqtts://';
+  }
+  return true;
+}
+
+async function promptMqttProxy(ctx: WizardContext): Promise<MqttProxyConfig> {
+  const broker_url = await ctx.prompts.input('MQTT broker URL:', {
+    default: 'mqtt://localhost:1883',
+    validate: validateBrokerUrl,
+  });
+
+  const device_id = await ctx.prompts.input('ESP32 device ID:', {
+    default: 'esp32-ble-proxy',
+  });
+
+  const topic_prefix = await ctx.prompts.input('MQTT topic prefix:', {
+    default: 'ble-proxy',
+  });
+
+  const hasAuth = await ctx.prompts.confirm('Does the MQTT broker require authentication?', {
+    default: false,
+  });
+
+  let username: string | undefined;
+  let password: string | undefined;
+  if (hasAuth) {
+    username = await ctx.prompts.input('MQTT username:');
+    password = await ctx.prompts.password('MQTT password:');
+  }
+
+  return {
+    broker_url,
+    device_id,
+    topic_prefix,
+    ...(username ? { username } : {}),
+    ...(password ? { password } : {}),
+  };
+}
+
 export const bleStep: WizardStep = {
   id: 'ble',
   title: 'BLE Scale Discovery',
@@ -19,6 +61,33 @@ export const bleStep: WizardStep = {
   async run(ctx: WizardContext): Promise<void> {
     if (!ctx.config.ble) ctx.config.ble = { handler: 'auto' };
 
+    // --- Handler selection ---
+    const handler = await ctx.prompts.select(
+      'How does this device connect to your BLE scale?',
+      [
+        {
+          name: 'Directly via Bluetooth (Recommended)',
+          value: 'auto' as const,
+          description: 'This machine has a Bluetooth adapter',
+        },
+        {
+          name: 'Via ESP32 MQTT proxy',
+          value: 'mqtt-proxy' as const,
+          description: 'Remote BLE scanning via an ESP32 device',
+        },
+      ],
+    );
+
+    ctx.config.ble.handler = handler;
+
+    if (handler === 'mqtt-proxy') {
+      ctx.config.ble.mqtt_proxy = await promptMqttProxy(ctx);
+      console.log(`\n  ${info('MQTT proxy configured — scale discovery will use the ESP32.')}`);
+    } else {
+      ctx.config.ble.mqtt_proxy = undefined;
+    }
+
+    // --- Scale discovery ---
     for (;;) {
       const choice = await ctx.prompts.select('How do you want to identify your scale?', [
         {
@@ -63,14 +132,12 @@ export const bleStep: WizardStep = {
       try {
         const { scanDevices } = await import('../../ble/index.js');
         const { adapters } = await import('../../scales/index.js');
-        const { loadBleConfig } = await import('../../config/load.js');
 
-        const bleConfig = loadBleConfig();
         const results = await scanDevices(
           adapters,
           15_000,
-          bleConfig.bleHandler,
-          bleConfig.mqttProxy,
+          ctx.config.ble!.handler,
+          ctx.config.ble!.mqtt_proxy,
         );
         const recognized = results.filter((r) => r.matchedAdapter);
 
@@ -141,4 +208,4 @@ export const bleStep: WizardStep = {
 };
 
 // Exported for testing
-export { validateMac };
+export { validateMac, validateBrokerUrl, promptMqttProxy };

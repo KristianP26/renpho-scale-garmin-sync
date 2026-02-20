@@ -3,7 +3,12 @@
 import { parseArgs } from 'node:util';
 import { writeFileSync } from 'node:fs';
 import { scanAndRead, scanAndReadRaw } from './ble/index.js';
-import { publishBeep } from './ble/handler-mqtt-proxy.js';
+import {
+  publishBeep,
+  publishDisplayReading,
+  publishDisplayResult,
+  setDisplayUsers,
+} from './ble/handler-mqtt-proxy.js';
 import { abortableSleep } from './ble/types.js';
 import { adapters } from './scales/index.js';
 import { createLogger } from './logger.js';
@@ -210,13 +215,30 @@ async function runSingleUserCycle(exporters?: Exporter[]): Promise<boolean> {
     return true;
   }
 
+  if (bleHandler === 'mqtt-proxy' && mqttProxy) {
+    publishDisplayReading(
+      mqttProxy,
+      user.slug,
+      user.name,
+      payload.weight,
+      payload.impedance,
+      exporters.map((e) => e.name),
+    ).catch(() => {});
+  }
+
   const context: ExportContext = {
     userName: user.name,
     userSlug: user.slug,
     userConfig: user,
   };
 
-  return dispatchExports(exporters, payload, context);
+  const { success, details } = await dispatchExports(exporters, payload, context);
+
+  if (bleHandler === 'mqtt-proxy' && mqttProxy) {
+    publishDisplayResult(mqttProxy, user.slug, user.name, payload.weight, details).catch(() => {});
+  }
+
+  return success;
 }
 
 // ─── Multi-user cycle ───────────────────────────────────────────────────────
@@ -265,6 +287,21 @@ async function runMultiUserCycle(): Promise<boolean> {
     publishBeep(mqttProxy, 1200, 200, 2).catch(() => {});
   }
 
+  // Build exporters for this user (cached) — needed for display reading names
+  const exporters = getExportersForUser(user.slug);
+
+  // Notify display: user matched, export in progress
+  if (bleHandler === 'mqtt-proxy' && mqttProxy) {
+    publishDisplayReading(
+      mqttProxy,
+      user.slug,
+      user.name,
+      weight,
+      raw.reading.impedance,
+      exporters.map((e) => e.name),
+    ).catch(() => {});
+  }
+
   // Drift detection
   const drift = detectWeightDrift(user, weight);
   if (drift) log.warn(`${prefix} ${drift}`);
@@ -283,9 +320,6 @@ async function runMultiUserCycle(): Promise<boolean> {
     return true;
   }
 
-  // Build exporters for this user (cached)
-  const exporters = getExportersForUser(user.slug);
-
   // Build export context
   const context: ExportContext = {
     userName: user.name,
@@ -294,7 +328,12 @@ async function runMultiUserCycle(): Promise<boolean> {
     ...(drift ? { driftWarning: drift } : {}),
   };
 
-  const success = await dispatchExports(exporters, payload, context);
+  const { success, details } = await dispatchExports(exporters, payload, context);
+
+  // Notify display: export results
+  if (bleHandler === 'mqtt-proxy' && mqttProxy) {
+    publishDisplayResult(mqttProxy, user.slug, user.name, payload.weight, details).catch(() => {});
+  }
 
   // Update last known weight in config.yaml (async, debounced)
   if (configSource === 'yaml' && configPath) {
@@ -332,6 +371,17 @@ async function main(): Promise<void> {
     }
   }
 
+  // Publish user info for display boards (included in config topic)
+  if (bleHandler === 'mqtt-proxy' && mqttProxy) {
+    setDisplayUsers(
+      appConfig.users.map((u) => ({
+        slug: u.slug,
+        name: u.name,
+        weight_range: u.weight_range,
+      })),
+    );
+  }
+
   if (!continuousMode) {
     touchHeartbeat();
     const success = isMultiUser ? await runMultiUserCycle() : await runSingleUserCycle(exporters);
@@ -339,7 +389,11 @@ async function main(): Promise<void> {
     return;
   }
 
-  // Continuous mode loop
+  // Continuous mode loop with exponential backoff on failures
+  const BACKOFF_INITIAL_MS = 5_000;
+  const BACKOFF_MAX_MS = 60_000;
+  let backoffMs = 0; // 0 = no failure yet
+
   while (!signal.aborted) {
     try {
       touchHeartbeat();
@@ -359,13 +413,19 @@ async function main(): Promise<void> {
         await runSingleUserCycle(exporters);
       }
 
+      backoffMs = 0; // Reset backoff on success
+
       if (signal.aborted) break;
       const cooldown = appConfig.runtime?.scan_cooldown ?? scanCooldownSec;
       log.info(`\nWaiting ${cooldown}s before next scan...`);
       await abortableSleep(cooldown * 1000, signal);
     } catch (err) {
       if (signal.aborted) break;
-      log.info(`No scale found, retrying... (${errMsg(err)})`);
+
+      // Exponential backoff: 5s → 10s → 20s → 40s → 60s (cap)
+      backoffMs = backoffMs === 0 ? BACKOFF_INITIAL_MS : Math.min(backoffMs * 2, BACKOFF_MAX_MS);
+      log.info(`No scale found, retrying in ${backoffMs / 1000}s... (${errMsg(err)})`);
+      await abortableSleep(backoffMs, signal).catch(() => {});
     }
   }
 

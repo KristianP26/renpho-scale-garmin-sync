@@ -120,8 +120,17 @@ function createBroadcastAdapter(name = 'BroadcastScale'): ScaleAdapter {
 // ─── Import the module under test ────────────────────────────────────────────
 
 // Must import AFTER vi.mock
-const { scanAndReadRaw, scanAndRead, scanDevices, publishConfig, publishBeep, registerScaleMac } =
-  await import('../../src/ble/handler-mqtt-proxy.js');
+const {
+  scanAndReadRaw,
+  scanAndRead,
+  scanDevices,
+  publishConfig,
+  publishBeep,
+  registerScaleMac,
+  publishDisplayReading,
+  publishDisplayResult,
+  setDisplayUsers,
+} = await import('../../src/ble/handler-mqtt-proxy.js');
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -514,6 +523,126 @@ describe('handler-mqtt-proxy', () => {
         `${PREFIX}/beep`,
         JSON.stringify({ freq: 600 }),
       );
+    });
+  });
+
+  describe('publishConfig with users', () => {
+    it('includes users in config payload when provided', async () => {
+      const users = [
+        { slug: 'alice', name: 'Alice', weight_range: { min: 55, max: 65 } },
+        { slug: 'bob', name: 'Bob', weight_range: { min: 75, max: 85 } },
+      ];
+      await publishConfig(MQTT_PROXY_CONFIG, ['AA:BB:CC:DD:EE:FF'], users);
+
+      expect(mockClient.publishAsync).toHaveBeenCalledWith(
+        `${PREFIX}/config`,
+        JSON.stringify({ scales: ['AA:BB:CC:DD:EE:FF'], users }),
+        { retain: true },
+      );
+    });
+
+    it('omits users key when users array is empty', async () => {
+      await publishConfig(MQTT_PROXY_CONFIG, ['AA:BB:CC:DD:EE:FF'], []);
+
+      expect(mockClient.publishAsync).toHaveBeenCalledWith(
+        `${PREFIX}/config`,
+        JSON.stringify({ scales: ['AA:BB:CC:DD:EE:FF'] }),
+        { retain: true },
+      );
+    });
+
+    it('omits users key when not provided', async () => {
+      await publishConfig(MQTT_PROXY_CONFIG, ['AA:BB:CC:DD:EE:FF']);
+
+      const payload = JSON.parse(
+        (mockClient.publishAsync as ReturnType<typeof vi.fn>).mock.calls[0][1] as string,
+      );
+      expect(payload).not.toHaveProperty('users');
+    });
+  });
+
+  describe('setDisplayUsers', () => {
+    it('stores users for inclusion in registerScaleMac config publishes', async () => {
+      setDisplayUsers([{ slug: 'alice', name: 'Alice', weight_range: { min: 55, max: 65 } }]);
+
+      // registerScaleMac with a new MAC should include users in the config publish
+      await registerScaleMac(MQTT_PROXY_CONFIG, '11:22:33:44:55:66');
+
+      const payload = JSON.parse(
+        (mockClient.publishAsync as ReturnType<typeof vi.fn>).mock.calls[0][1] as string,
+      );
+      expect(payload.users).toEqual([
+        { slug: 'alice', name: 'Alice', weight_range: { min: 55, max: 65 } },
+      ]);
+
+      // Clean up
+      setDisplayUsers([]);
+    });
+  });
+
+  describe('publishDisplayReading', () => {
+    it('publishes reading to display/reading topic', async () => {
+      await publishDisplayReading(MQTT_PROXY_CONFIG, 'alice', 'Alice', 58.23, 512, [
+        'Garmin Connect',
+        'MQTT',
+      ]);
+
+      expect(mockClient.publishAsync).toHaveBeenCalledWith(
+        `${PREFIX}/display/reading`,
+        JSON.stringify({
+          slug: 'alice',
+          name: 'Alice',
+          weight: 58.23,
+          exporters: ['Garmin Connect', 'MQTT'],
+          impedance: 512,
+        }),
+      );
+      expect(mockClient.endAsync).toHaveBeenCalled();
+    });
+
+    it('omits impedance when undefined', async () => {
+      await publishDisplayReading(MQTT_PROXY_CONFIG, 'alice', 'Alice', 58.23, undefined, ['MQTT']);
+
+      const payload = JSON.parse(
+        (mockClient.publishAsync as ReturnType<typeof vi.fn>).mock.calls[0][1] as string,
+      );
+      expect(payload).not.toHaveProperty('impedance');
+    });
+  });
+
+  describe('publishDisplayResult', () => {
+    it('publishes result to display/result topic', async () => {
+      await publishDisplayResult(MQTT_PROXY_CONFIG, 'alice', 'Alice', 58.23, [
+        { name: 'Garmin Connect', ok: true },
+        { name: 'MQTT', ok: true },
+      ]);
+
+      expect(mockClient.publishAsync).toHaveBeenCalledWith(
+        `${PREFIX}/display/result`,
+        JSON.stringify({
+          slug: 'alice',
+          name: 'Alice',
+          weight: 58.23,
+          exports: [
+            { name: 'Garmin Connect', ok: true },
+            { name: 'MQTT', ok: true },
+          ],
+        }),
+      );
+      expect(mockClient.endAsync).toHaveBeenCalled();
+    });
+
+    it('includes failed exports with ok: false', async () => {
+      await publishDisplayResult(MQTT_PROXY_CONFIG, 'bob', 'Bob', 80.5, [
+        { name: 'Garmin Connect', ok: false },
+        { name: 'MQTT', ok: true },
+      ]);
+
+      const payload = JSON.parse(
+        (mockClient.publishAsync as ReturnType<typeof vi.fn>).mock.calls[0][1] as string,
+      );
+      expect(payload.exports[0].ok).toBe(false);
+      expect(payload.exports[1].ok).toBe(true);
     });
   });
 });

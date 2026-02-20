@@ -76,9 +76,9 @@ def on_message(topic_bytes, msg, retained):
             data = json.loads(msg)
             _scale_macs = set(data.get("scales", []))
             print(f"Config: {len(_scale_macs)} scale MAC(s)")
-            # Pass user list to display (sync-safe, no-ops if no display)
             if board.HAS_DISPLAY:
                 ui.on_config_update(data.get("users", []))
+                ui.on_scale_macs_update(len(_scale_macs) > 0)
         except Exception as e:
             print(f"Bad config payload: {e}")
         return
@@ -96,11 +96,14 @@ async def on_connect(client_ref):
     if board.HAS_DISPLAY:
         await client_ref.subscribe(topic("display/reading"), 0)
         await client_ref.subscribe(topic("display/result"), 0)
+        await client_ref.subscribe(topic("screenshot"), 0)
     # Re-subscribe write/read wildcards if a BLE device is connected
     if _char_subscribed:
         await client_ref.subscribe(topic("write/#"), 0)
         await client_ref.subscribe(topic("read/#"), 0)
     _subs_ready = True
+    if board.HAS_DISPLAY:
+        ui.on_mqtt_change(True)
     await client_ref.publish(topic("status"), "online", retain=True, qos=1)
     print(f"BLE-MQTT bridge ready: {BASE}")
 
@@ -269,13 +272,39 @@ async def handle_read(uuid_str):
     await client.publish(topic(f"read/{uuid_str}/response"), data, qos=0)
 
 
+# ─── Connection monitor (display boards only) ────────────────────────────────
+
+if board.HAS_DISPLAY:
+    import network
+    _wlan = network.WLAN(network.STA_IF)
+
+    async def _connection_monitor():
+        """Poll WiFi/MQTT status every 2s and update UI indicators."""
+        prev_wifi = False
+        prev_mqtt = False
+        while True:
+            wifi_now = _wlan.isconnected()
+            mqtt_now = client.isconnected()
+            if wifi_now != prev_wifi:
+                ui.on_wifi_change(wifi_now)
+                prev_wifi = wifi_now
+            if mqtt_now != prev_mqtt:
+                ui.on_mqtt_change(mqtt_now)
+                prev_mqtt = mqtt_now
+            await asyncio.sleep(2)
+
+
 # ─── Main loop ────────────────────────────────────────────────────────────────
 
 async def main():
     print(f"Board: {board.BOARD_NAME}")
     if board.HAS_DISPLAY:
         ui.init()
+        asyncio.create_task(_connection_monitor())
     await client.connect()
+    if board.HAS_DISPLAY:
+        ui.on_wifi_change(True)
+        ui.on_mqtt_change(True)
     # Start autonomous BLE scan loop
     asyncio.create_task(scan_loop())
     gc_counter = 0
@@ -314,6 +343,36 @@ async def main():
                             d.get("weight", 0),
                             d.get("exports", []),
                         )
+                elif t == topic("screenshot"):
+                    if board.HAS_DISPLAY:
+                        import lvgl as lv
+                        try:
+                            snap = lv.snapshot_take(lv.screen_active(), lv.COLOR_FORMAT.RGB565)
+                            if snap:
+                                sz = snap.data_size
+                                buf = snap.data.__dereference__(sz)
+                                raw = bytes(buf)
+                                snap.destroy()
+                                gc.collect()
+                                # Publish in 4KB chunks over MQTT
+                                CHUNK = 4096
+                                total = len(raw)
+                                n_chunks = (total + CHUNK - 1) // CHUNK
+                                await client.publish(topic("screenshot/info"), json.dumps({
+                                    "w": 480, "h": 480, "fmt": "rgb565", "size": total, "chunks": n_chunks
+                                }), qos=0)
+                                for i in range(n_chunks):
+                                    chunk = raw[i * CHUNK : (i + 1) * CHUNK]
+                                    await client.publish(topic(f"screenshot/{i}"), chunk, qos=0)
+                                    await asyncio.sleep_ms(20)
+                                await client.publish(topic("screenshot/done"), str(n_chunks), qos=0)
+                                print(f"Screenshot sent: {n_chunks} chunks")
+                                gc.collect()
+                            else:
+                                print("Screenshot failed")
+                        except Exception as e:
+                            import sys
+                            sys.print_exception(e)
                 elif t.startswith(topic("write/")):
                     uuid_str = t[len(topic("write/")):]
                     await handle_write(uuid_str, msg)

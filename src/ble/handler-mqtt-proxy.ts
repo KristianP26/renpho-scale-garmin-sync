@@ -40,6 +40,7 @@ function toBleDeviceInfo(entry: ScanResultEntry): BleDeviceInfo {
 function topics(prefix: string, deviceId: string) {
   const base = `${prefix}/${deviceId}`;
   return {
+    base,
     status: `${base}/status`,
     scanResults: `${base}/scan/results`,
     config: `${base}/config`,
@@ -68,25 +69,38 @@ async function createMqttClient(config: MqttProxyConfig): Promise<MqttClient> {
 }
 
 async function waitForEsp32Online(client: MqttClient, t: ReturnType<typeof topics>): Promise<void> {
+  let resolve!: () => void;
+  let sawOffline = false;
+  const promise = new Promise<void>((res) => {
+    resolve = res;
+  });
   const onMessage = (topic: string, payload: Buffer) => {
     if (topic === t.status) {
       const msg = payload.toString();
       if (msg === 'online') resolve();
-      else if (msg === 'offline')
-        reject(new Error('ESP32 proxy is offline. Check the device and its WiFi/MQTT connection.'));
+      else if (msg === 'offline') sawOffline = true;
+      // If 'offline', keep waiting — ESP32 may come back before timeout
     }
   };
-  let resolve!: () => void;
-  let reject!: (err: Error) => void;
-  const promise = new Promise<void>((res, rej) => {
-    resolve = res;
-    reject = rej;
-  });
   client.on('message', onMessage);
   await client.subscribeAsync(t.status);
+
+  // If we get the retained offline within 2s, fail fast rather than waiting 30s.
+  // The main loop's backoff handles retries. But if online arrives within that
+  // window we still succeed. Full timeout only applies when no status received.
+  const OFFLINE_GRACE_MS = 2_000;
+
   try {
     return await withTimeout(
-      promise,
+      Promise.race([
+        promise,
+        // After grace period, if we saw offline, reject early
+        new Promise<never>((_res, rej) =>
+          setTimeout(() => {
+            if (sawOffline) rej(new Error('ESP32 proxy is offline. Check the device and its WiFi/MQTT connection.'));
+          }, OFFLINE_GRACE_MS),
+        ),
+      ]),
       COMMAND_TIMEOUT_MS,
       'ESP32 proxy did not respond. Check that it is powered on and connected to MQTT.',
     );
@@ -204,11 +218,33 @@ export async function scanAndRead(opts: ScanOptions): Promise<BodyComposition> {
 /** Tracked scale MACs discovered via adapter matching. */
 const discoveredScaleMacs = new Set<string>();
 
-export async function publishConfig(config: MqttProxyConfig, scales: string[]): Promise<void> {
+// ─── Display user info ───────────────────────────────────────────────────────
+
+export interface DisplayUser {
+  slug: string;
+  name: string;
+  weight_range: { min: number; max: number };
+}
+
+let _displayUsers: DisplayUser[] = [];
+
+export function setDisplayUsers(users: DisplayUser[]): void {
+  _displayUsers = users;
+}
+
+export async function publishConfig(
+  config: MqttProxyConfig,
+  scales: string[],
+  users?: DisplayUser[],
+): Promise<void> {
   const t = topics(config.topic_prefix, config.device_id);
   const client = await createMqttClient(config);
   try {
-    await client.publishAsync(t.config, JSON.stringify({ scales }), { retain: true });
+    const payload: Record<string, unknown> = { scales };
+    if (users && users.length > 0) {
+      payload.users = users;
+    }
+    await client.publishAsync(t.config, JSON.stringify(payload), { retain: true });
   } finally {
     try {
       await client.endAsync();
@@ -227,7 +263,7 @@ export async function registerScaleMac(config: MqttProxyConfig, mac: string): Pr
   if (discoveredScaleMacs.has(upper)) return; // already known
   discoveredScaleMacs.add(upper);
   bleLog.info(`Registered scale MAC ${upper} for ESP32 beep (${discoveredScaleMacs.size} total)`);
-  await publishConfig(config, [...discoveredScaleMacs]);
+  await publishConfig(config, [...discoveredScaleMacs], _displayUsers);
 }
 
 export async function publishBeep(
@@ -248,6 +284,52 @@ export async function publishBeep(
           })
         : '';
     await client.publishAsync(t.beep, payload);
+  } finally {
+    try {
+      await client.endAsync();
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+// ─── Display feedback publishes ──────────────────────────────────────────────
+
+export async function publishDisplayReading(
+  config: MqttProxyConfig,
+  slug: string,
+  name: string,
+  weight: number,
+  impedance: number | undefined,
+  exporterNames: string[],
+): Promise<void> {
+  const t = topics(config.topic_prefix, config.device_id);
+  const client = await createMqttClient(config);
+  try {
+    const payload: Record<string, unknown> = { slug, name, weight, exporters: exporterNames };
+    if (impedance != null) payload.impedance = impedance;
+    await client.publishAsync(`${t.base}/display/reading`, JSON.stringify(payload));
+  } finally {
+    try {
+      await client.endAsync();
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+export async function publishDisplayResult(
+  config: MqttProxyConfig,
+  slug: string,
+  name: string,
+  weight: number,
+  exports: Array<{ name: string; ok: boolean }>,
+): Promise<void> {
+  const t = topics(config.topic_prefix, config.device_id);
+  const client = await createMqttClient(config);
+  try {
+    const payload = { slug, name, weight, exports };
+    await client.publishAsync(`${t.base}/display/result`, JSON.stringify(payload));
   } finally {
     try {
       await client.endAsync();
