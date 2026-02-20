@@ -7,8 +7,9 @@
 
 States: STARTUP -> IDLE -> SCALE_DETECTED -> READING -> RESULT -> IDLE
 
-The frozen ``display`` module (compiled into LVGL firmware) handles hardware init.
-This module only manages the UI layer on top.
+Hardware init is handled by board_guition_4848.init_display() using the
+rgb_panel_lvgl C module.  This module only manages the UI layer on top.
+LVGL tick is driven by an esp_timer in the C driver (no Python tick_inc needed).
 """
 
 import time
@@ -114,11 +115,18 @@ def init():
         return
 
     try:
-        import display  # noqa: F401 — frozen module, inits hardware
         import lvgl as lv
     except ImportError:
         print("LVGL not available — display disabled")
         return
+
+    # Initialise display hardware (ST7701S panel + RGB bus + LVGL driver)
+    result = board.init_display()
+    if not result:
+        print("Display init failed — UI disabled")
+        return
+    # Store display object in board module namespace for screenshot access
+    board.display_dev = result
 
     scr = lv.screen_active()
     scr.set_style_bg_color(_color(_BG), 0)
@@ -524,8 +532,9 @@ def check_timeout():
         _set_state(IDLE)
         _show_idle()
 
-    # Tick LVGL
+    # Process pending LVGL renders (tick is handled by C esp_timer)
     try:
         lv.task_handler()
     except Exception:
         pass
+

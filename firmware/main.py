@@ -345,14 +345,11 @@ async def main():
                         )
                 elif t == topic("screenshot"):
                     if board.HAS_DISPLAY:
-                        import lvgl as lv
                         try:
-                            snap = lv.snapshot_take(lv.screen_active(), lv.COLOR_FORMAT.RGB565)
-                            if snap:
-                                sz = snap.data_size
-                                buf = snap.data.__dereference__(sz)
-                                raw = bytes(buf)
-                                snap.destroy()
+                            # Read directly from DMA framebuffer (not LVGL snapshot)
+                            fb = board.display_dev.framebuffer(0)
+                            if fb:
+                                raw = bytes(fb)
                                 gc.collect()
                                 # Publish in 4KB chunks over MQTT
                                 CHUNK = 4096
@@ -360,12 +357,12 @@ async def main():
                                 n_chunks = (total + CHUNK - 1) // CHUNK
                                 await client.publish(topic("screenshot/info"), json.dumps({
                                     "w": 480, "h": 480, "fmt": "rgb565", "size": total, "chunks": n_chunks
-                                }), qos=0)
+                                }), qos=1)
                                 for i in range(n_chunks):
                                     chunk = raw[i * CHUNK : (i + 1) * CHUNK]
-                                    await client.publish(topic(f"screenshot/{i}"), chunk, qos=0)
+                                    await client.publish(topic(f"screenshot/{i}"), chunk, qos=1)
                                     await asyncio.sleep_ms(20)
-                                await client.publish(topic("screenshot/done"), str(n_chunks), qos=0)
+                                await client.publish(topic("screenshot/done"), str(n_chunks), qos=1)
                                 print(f"Screenshot sent: {n_chunks} chunks")
                                 gc.collect()
                             else:

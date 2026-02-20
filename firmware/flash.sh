@@ -9,9 +9,10 @@
 #   ./flash.sh                          # full flash (auto-detect board)
 #   ./flash.sh --board atom_echo        # full flash for Atom Echo
 #   ./flash.sh --board esp32_s3         # full flash for ESP32-S3
+#   ./flash.sh --board guition_4848     # full flash for Guition display
 #   ./flash.sh --app-only               # re-upload .py files (fast iteration)
 #   ./flash.sh --libs-only              # re-install MicroPython libraries
-#   ./flash.sh --board esp32_s3 --app-only
+#   ./flash.sh --board guition_4848 --app-only
 #
 # The script auto-detects the serial port. Override with:
 #   PORT=/dev/ttyACM0 ./flash.sh
@@ -71,19 +72,18 @@ configure_board() {
       BAUD=460800
       BOARD_MODULE="board_esp32_s3.py"
       ;;
-    esp32_s3_4848)
+    guition_4848)
       CHIP="esp32s3"
       # LVGL-enabled MicroPython firmware — build from source:
-      #   cd ../lvgl_micropython && python3 make.py esp32 --toml=display_configs/ESP32-S3-4848S040.toml
-      # Then copy build/lvgl_micropy_ESP32_GENERIC_S3-SPIRAM_OCT-16.bin to firmware/
+      #   cd ../drivers && ./build.sh guition_4848
       FIRMWARE_URL=""  # No pre-built binary; use local build
-      FIRMWARE_FILE="lvgl_micropy_ESP32_GENERIC_S3-SPIRAM_OCT-16.bin"
+      FIRMWARE_FILE="firmware_guition_4848.bin"
       FLASH_OFFSET="0x0"
       BAUD=460800
-      BOARD_MODULE="board_esp32_s3_4848.py"
+      BOARD_MODULE="board_guition_4848.py"
       ;;
     *)
-      die "Unknown board: $board_name (valid: atom_echo, esp32_s3, esp32_s3_4848)"
+      die "Unknown board: $board_name (valid: atom_echo, esp32_s3, guition_4848)"
       ;;
   esac
 }
@@ -192,7 +192,8 @@ upload_app() {
   mpremote connect "$port" cp "$BOARD_MODULE" ":$BOARD_MODULE"
   mpremote connect "$port" cp ble_bridge.py :ble_bridge.py
   mpremote connect "$port" cp beep.py :beep.py
-  if [[ "$BOARD" == "esp32_s3_4848" ]]; then
+  if [[ "$BOARD" == "guition_4848" ]]; then
+    mpremote connect "$port" cp panel_init_guition_4848.py :panel_init_guition_4848.py
     mpremote connect "$port" cp ui.py :ui.py
   fi
   mpremote connect "$port" cp main.py :main.py
