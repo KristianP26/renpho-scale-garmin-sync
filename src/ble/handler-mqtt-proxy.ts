@@ -68,6 +68,52 @@ async function createMqttClient(config: MqttProxyConfig): Promise<MqttClient> {
   return client;
 }
 
+// ─── Persistent MQTT client (for continuous mode) ────────────────────────────
+
+let _persistentClient: MqttClient | null = null;
+
+async function getOrCreatePersistentClient(config: MqttProxyConfig): Promise<MqttClient> {
+  if (_persistentClient?.connected) return _persistentClient;
+  if (_persistentClient) {
+    try {
+      await _persistentClient.endAsync();
+    } catch {
+      /* ignore */
+    }
+  }
+  const { connectAsync } = await import('mqtt');
+  _persistentClient = await withTimeout(
+    connectAsync(config.broker_url, {
+      clientId: `ble-scale-sync-${config.device_id}`,
+      username: config.username ?? undefined,
+      password: config.password ?? undefined,
+      clean: true,
+      reconnectPeriod: 5000,
+    }),
+    COMMAND_TIMEOUT_MS,
+    `MQTT broker unreachable at ${config.broker_url}. Check your mqtt_proxy.broker_url config.`,
+  );
+  return _persistentClient;
+}
+
+/** Get the persistent client if connected, otherwise create an ephemeral one. */
+async function getClient(config: MqttProxyConfig): Promise<{ client: MqttClient; ephemeral: boolean }> {
+  if (_persistentClient?.connected) {
+    return { client: _persistentClient, ephemeral: false };
+  }
+  return { client: await createMqttClient(config), ephemeral: true };
+}
+
+/** End an ephemeral client; no-op for the persistent client. */
+async function releaseClient(client: MqttClient, ephemeral: boolean): Promise<void> {
+  if (!ephemeral) return;
+  try {
+    await client.endAsync();
+  } catch {
+    /* ignore */
+  }
+}
+
 async function waitForEsp32Online(client: MqttClient, t: ReturnType<typeof topics>): Promise<void> {
   let resolve!: () => void;
   let sawOffline = false;
@@ -215,6 +261,71 @@ export async function scanAndRead(opts: ScanOptions): Promise<BodyComposition> {
   return adapter.computeMetrics(reading, opts.profile);
 }
 
+/**
+ * Persistent event-driven scan listener for continuous mode.
+ * Keeps the MQTT connection alive and resolves as soon as a matching
+ * broadcast reading arrives. Waits indefinitely (controlled by abortSignal).
+ */
+export async function watchForReadings(opts: ScanOptions): Promise<RawReading> {
+  const config = opts.mqttProxy;
+  if (!config) throw new Error('mqtt_proxy config is required for mqtt-proxy handler');
+
+  const { targetMac, adapters, abortSignal } = opts;
+  const t = topics(config.topic_prefix, config.device_id);
+
+  const client = await getOrCreatePersistentClient(config);
+  await waitForEsp32Online(client, t);
+  bleLog.info('ESP32 proxy is online');
+  await client.subscribeAsync(t.scanResults);
+
+  return new Promise<RawReading>((resolve, reject) => {
+    const onAbort = () => {
+      cleanup();
+      reject(new DOMException('Aborted', 'AbortError'));
+    };
+    abortSignal?.addEventListener('abort', onAbort, { once: true });
+
+    const handler = (topic: string, payload: Buffer) => {
+      if (topic !== t.scanResults) return;
+      try {
+        const results: ScanResultEntry[] = JSON.parse(payload.toString());
+        const candidates = targetMac
+          ? results.filter((e) => e.address.toLowerCase() === targetMac.toLowerCase())
+          : results;
+
+        for (const entry of candidates) {
+          const info = toBleDeviceInfo(entry);
+          const adapter = adapters.find((a) => a.matches(info));
+          if (!adapter) continue;
+
+          if (adapter.parseBroadcast && entry.manufacturer_data) {
+            const reading = adapter.parseBroadcast(Buffer.from(entry.manufacturer_data, 'hex'));
+            if (reading) {
+              cleanup();
+              bleLog.info(`Matched: ${adapter.name} (${entry.address})`);
+              bleLog.info(`Broadcast reading: ${reading.weight} kg`);
+              registerScaleMac(config, entry.address).catch(() => {});
+              resolve({ reading, adapter });
+              return;
+            }
+          }
+        }
+        // No match this scan — keep listening for the next one
+      } catch {
+        /* ignore parse errors, keep listening */
+      }
+    };
+
+    client.on('message', handler);
+
+    function cleanup() {
+      client.removeListener('message', handler);
+      abortSignal?.removeEventListener('abort', onAbort);
+      // Don't unsubscribe or disconnect — keep listening for next cycle
+    }
+  });
+}
+
 /** Tracked scale MACs discovered via adapter matching. */
 const discoveredScaleMacs = new Set<string>();
 
@@ -238,7 +349,7 @@ export async function publishConfig(
   users?: DisplayUser[],
 ): Promise<void> {
   const t = topics(config.topic_prefix, config.device_id);
-  const client = await createMqttClient(config);
+  const { client, ephemeral } = await getClient(config);
   try {
     const payload: Record<string, unknown> = { scales };
     if (users && users.length > 0) {
@@ -246,11 +357,7 @@ export async function publishConfig(
     }
     await client.publishAsync(t.config, JSON.stringify(payload), { retain: true });
   } finally {
-    try {
-      await client.endAsync();
-    } catch {
-      /* ignore */
-    }
+    await releaseClient(client, ephemeral);
   }
 }
 
@@ -273,7 +380,7 @@ export async function publishBeep(
   repeat?: number,
 ): Promise<void> {
   const t = topics(config.topic_prefix, config.device_id);
-  const client = await createMqttClient(config);
+  const { client, ephemeral } = await getClient(config);
   try {
     const payload =
       freq != null || duration != null || repeat != null
@@ -285,11 +392,7 @@ export async function publishBeep(
         : '';
     await client.publishAsync(t.beep, payload);
   } finally {
-    try {
-      await client.endAsync();
-    } catch {
-      /* ignore */
-    }
+    await releaseClient(client, ephemeral);
   }
 }
 
@@ -304,17 +407,13 @@ export async function publishDisplayReading(
   exporterNames: string[],
 ): Promise<void> {
   const t = topics(config.topic_prefix, config.device_id);
-  const client = await createMqttClient(config);
+  const { client, ephemeral } = await getClient(config);
   try {
     const payload: Record<string, unknown> = { slug, name, weight, exporters: exporterNames };
     if (impedance != null) payload.impedance = impedance;
     await client.publishAsync(`${t.base}/display/reading`, JSON.stringify(payload));
   } finally {
-    try {
-      await client.endAsync();
-    } catch {
-      /* ignore */
-    }
+    await releaseClient(client, ephemeral);
   }
 }
 
@@ -326,16 +425,12 @@ export async function publishDisplayResult(
   exports: Array<{ name: string; ok: boolean }>,
 ): Promise<void> {
   const t = topics(config.topic_prefix, config.device_id);
-  const client = await createMqttClient(config);
+  const { client, ephemeral } = await getClient(config);
   try {
     const payload = { slug, name, weight, exports };
     await client.publishAsync(`${t.base}/display/result`, JSON.stringify(payload));
   } finally {
-    try {
-      await client.endAsync();
-    } catch {
-      /* ignore */
-    }
+    await releaseClient(client, ephemeral);
   }
 }
 

@@ -66,6 +66,20 @@ export async function scanAndReadRaw(opts: ScanOptions): Promise<RawReading> {
 }
 
 /**
+ * Persistent event-driven scan listener for mqtt-proxy continuous mode.
+ * Keeps the MQTT connection alive and resolves when a matching reading arrives.
+ * Only supports mqtt-proxy handler.
+ */
+export async function watchForReadings(opts: ScanOptions): Promise<RawReading> {
+  if (opts.bleHandler !== 'mqtt-proxy') {
+    throw new Error('watchForReadings() only supports mqtt-proxy handler');
+  }
+  bleLog.debug('BLE handler: mqtt-proxy (ESP32) — persistent watch mode');
+  const { watchForReadings: impl } = await import('./handler-mqtt-proxy.js');
+  return impl(opts);
+}
+
+/**
  * Scan for a BLE scale, read weight + impedance, and compute body composition.
  *
  * OS detection selects the BLE handler at runtime:

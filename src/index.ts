@@ -2,7 +2,8 @@
 
 import { parseArgs } from 'node:util';
 import { writeFileSync } from 'node:fs';
-import { scanAndRead, scanAndReadRaw } from './ble/index.js';
+import { scanAndReadRaw, watchForReadings } from './ble/index.js';
+import type { RawReading } from './ble/index.js';
 import {
   publishBeep,
   publishDisplayReading,
@@ -185,25 +186,11 @@ function buildAllUniqueExporters(): Exporter[] {
 
 // ─── Single-user cycle ──────────────────────────────────────────────────────
 
-async function runSingleUserCycle(exporters?: Exporter[]): Promise<boolean> {
+/** Process a raw reading for single-user mode: compute metrics, export, display feedback. */
+async function processSingleReading(raw: RawReading, exporters?: Exporter[]): Promise<boolean> {
   const { profile } = resolveForSingleUser(appConfig);
   const user = appConfig.users[0];
-
-  const payload: BodyComposition = await scanAndRead({
-    targetMac: SCALE_MAC,
-    adapters,
-    profile,
-    weightUnit,
-    abortSignal: signal,
-    bleHandler,
-    mqttProxy,
-    onLiveData(reading) {
-      const impStr: string = reading.impedance > 0 ? `${reading.impedance} Ohm` : 'Measuring...';
-      process.stdout.write(
-        `\r  Weight: ${fmtWeight(reading.weight, weightUnit)} | Impedance: ${impStr}      `,
-      );
-    },
-  });
+  const payload = raw.adapter.computeMetrics(raw.reading, profile);
 
   log.info(
     `\nMeasurement received: ${fmtWeight(payload.weight, weightUnit)} / ${payload.impedance} Ohm`,
@@ -241,16 +228,13 @@ async function runSingleUserCycle(exporters?: Exporter[]): Promise<boolean> {
   return success;
 }
 
-// ─── Multi-user cycle ───────────────────────────────────────────────────────
-
-async function runMultiUserCycle(): Promise<boolean> {
-  // Use first user's profile for BLE connection (needed by some adapters for onConnected)
-  const defaultProfile = resolveUserProfile(appConfig.users[0], appConfig.scale);
+async function runSingleUserCycle(exporters?: Exporter[]): Promise<boolean> {
+  const { profile } = resolveForSingleUser(appConfig);
 
   const raw = await scanAndReadRaw({
     targetMac: SCALE_MAC,
     adapters,
-    profile: defaultProfile,
+    profile,
     weightUnit,
     abortSignal: signal,
     bleHandler,
@@ -263,6 +247,12 @@ async function runMultiUserCycle(): Promise<boolean> {
     },
   });
 
+  return processSingleReading(raw, exporters);
+}
+
+// ─── Process a raw reading (multi-user) ──────────────────────────────────────
+
+async function processRawReading(raw: RawReading): Promise<boolean> {
   const weight = raw.reading.weight;
   log.info(`\nRaw reading: ${fmtWeight(weight, weightUnit)} / ${raw.reading.impedance} Ohm`);
 
@@ -343,6 +333,31 @@ async function runMultiUserCycle(): Promise<boolean> {
   return success;
 }
 
+// ─── Multi-user cycle ───────────────────────────────────────────────────────
+
+async function runMultiUserCycle(): Promise<boolean> {
+  // Use first user's profile for BLE connection (needed by some adapters for onConnected)
+  const defaultProfile = resolveUserProfile(appConfig.users[0], appConfig.scale);
+
+  const raw = await scanAndReadRaw({
+    targetMac: SCALE_MAC,
+    adapters,
+    profile: defaultProfile,
+    weightUnit,
+    abortSignal: signal,
+    bleHandler,
+    mqttProxy,
+    onLiveData(reading) {
+      const impStr: string = reading.impedance > 0 ? `${reading.impedance} Ohm` : 'Measuring...';
+      process.stdout.write(
+        `\r  Weight: ${fmtWeight(reading.weight, weightUnit)} | Impedance: ${impStr}      `,
+      );
+    },
+  });
+
+  return processRawReading(raw);
+}
+
 // ─── Main ───────────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
@@ -394,38 +409,86 @@ async function main(): Promise<void> {
   const BACKOFF_MAX_MS = 60_000;
   let backoffMs = 0; // 0 = no failure yet
 
-  while (!signal.aborted) {
-    try {
-      touchHeartbeat();
+  if (bleHandler === 'mqtt-proxy' && mqttProxy) {
+    // Event-driven: persistent MQTT connection reacts to scan results as they arrive
+    const defaultProfile = resolveUserProfile(appConfig.users[0], appConfig.scale);
 
-      if (needsReload) {
-        await reloadConfig();
-        needsReload = false;
-        // Rebuild single-user exporters after reload
-        if (appConfig.users.length === 1 && !dryRun) {
-          exporters = buildSingleUserExporters();
+    while (!signal.aborted) {
+      try {
+        touchHeartbeat();
+
+        if (needsReload) {
+          await reloadConfig();
+          needsReload = false;
+          if (appConfig.users.length === 1 && !dryRun) {
+            exporters = buildSingleUserExporters();
+          }
         }
+
+        const raw = await watchForReadings({
+          targetMac: SCALE_MAC,
+          adapters,
+          profile: defaultProfile,
+          weightUnit,
+          abortSignal: signal,
+          bleHandler,
+          mqttProxy,
+        });
+
+        if (appConfig.users.length > 1) {
+          await processRawReading(raw);
+        } else {
+          await processSingleReading(raw, exporters);
+        }
+
+        backoffMs = 0;
+
+        if (signal.aborted) break;
+        const cooldown = appConfig.runtime?.scan_cooldown ?? scanCooldownSec;
+        log.info(`\nWaiting ${cooldown}s before next scan...`);
+        await abortableSleep(cooldown * 1000, signal);
+      } catch (err) {
+        if (signal.aborted) break;
+        backoffMs = backoffMs === 0 ? BACKOFF_INITIAL_MS : Math.min(backoffMs * 2, BACKOFF_MAX_MS);
+        log.info(`No scale found, retrying in ${backoffMs / 1000}s... (${errMsg(err)})`);
+        await abortableSleep(backoffMs, signal).catch(() => {});
       }
+    }
+  } else {
+    // Poll-based loop for auto/noble BLE handlers
+    while (!signal.aborted) {
+      try {
+        touchHeartbeat();
 
-      if (appConfig.users.length > 1) {
-        await runMultiUserCycle();
-      } else {
-        await runSingleUserCycle(exporters);
+        if (needsReload) {
+          await reloadConfig();
+          needsReload = false;
+          // Rebuild single-user exporters after reload
+          if (appConfig.users.length === 1 && !dryRun) {
+            exporters = buildSingleUserExporters();
+          }
+        }
+
+        if (appConfig.users.length > 1) {
+          await runMultiUserCycle();
+        } else {
+          await runSingleUserCycle(exporters);
+        }
+
+        backoffMs = 0; // Reset backoff on success
+
+        if (signal.aborted) break;
+        const cooldown = appConfig.runtime?.scan_cooldown ?? scanCooldownSec;
+        log.info(`\nWaiting ${cooldown}s before next scan...`);
+        await abortableSleep(cooldown * 1000, signal);
+      } catch (err) {
+        if (signal.aborted) break;
+
+        // Exponential backoff: 5s → 10s → 20s → 40s → 60s (cap)
+        backoffMs = backoffMs === 0 ? BACKOFF_INITIAL_MS : Math.min(backoffMs * 2, BACKOFF_MAX_MS);
+        log.info(`No scale found, retrying in ${backoffMs / 1000}s... (${errMsg(err)})`);
+        await abortableSleep(backoffMs, signal).catch(() => {});
       }
-
-      backoffMs = 0; // Reset backoff on success
-
-      if (signal.aborted) break;
-      const cooldown = appConfig.runtime?.scan_cooldown ?? scanCooldownSec;
-      log.info(`\nWaiting ${cooldown}s before next scan...`);
-      await abortableSleep(cooldown * 1000, signal);
-    } catch (err) {
-      if (signal.aborted) break;
-
-      // Exponential backoff: 5s → 10s → 20s → 40s → 60s (cap)
-      backoffMs = backoffMs === 0 ? BACKOFF_INITIAL_MS : Math.min(backoffMs * 2, BACKOFF_MAX_MS);
-      log.info(`No scale found, retrying in ${backoffMs / 1000}s... (${errMsg(err)})`);
-      await abortableSleep(backoffMs, signal).catch(() => {});
     }
   }
 
