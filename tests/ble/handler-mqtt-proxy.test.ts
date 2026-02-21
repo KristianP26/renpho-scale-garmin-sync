@@ -1161,6 +1161,52 @@ describe('handler-mqtt-proxy', () => {
       expect(raw.adapter.name).toBe('GattScale');
     });
 
+    it('rejects with ESP32 error instead of timeout when connect fails', async () => {
+      const adapter = createGattAdapter();
+
+      mockClient.subscribeAsync = vi.fn(async (topic: string) => {
+        if (topic === `${PREFIX}/status`) {
+          queueMicrotask(() => mockClient._simulateMessage(`${PREFIX}/status`, 'online'));
+        }
+        if (topic === `${PREFIX}/scan/results`) {
+          queueMicrotask(() =>
+            mockClient._simulateMessage(
+              `${PREFIX}/scan/results`,
+              JSON.stringify([
+                {
+                  address: 'AA:BB:CC:DD:EE:FF',
+                  name: 'GattScale',
+                  rssi: -50,
+                  services: [],
+                  addr_type: 0,
+                },
+              ]),
+            ),
+          );
+        }
+        return [];
+      });
+
+      const origPublish = mockClient.publishAsync;
+      mockClient.publishAsync = vi.fn(async (topic: string, payload?: string | Buffer) => {
+        if (topic === `${PREFIX}/connect`) {
+          // Simulate ESP32 failing to connect — publishes error instead of connected
+          queueMicrotask(() =>
+            mockClient._simulateMessage(`${PREFIX}/error`, 'Connection failed: device not found'),
+          );
+        }
+        return origPublish(topic, payload);
+      });
+
+      await expect(
+        scanAndReadRaw({
+          adapters: [adapter],
+          profile: PROFILE,
+          mqttProxy: MQTT_PROXY_CONFIG,
+        }),
+      ).rejects.toThrow('ESP32 error: Connection failed: device not found');
+    });
+
     it('broadcast scales still work unchanged (no regression)', async () => {
       const broadcastAdapter = createBroadcastAdapter();
       const gattAdapter = createGattAdapter();

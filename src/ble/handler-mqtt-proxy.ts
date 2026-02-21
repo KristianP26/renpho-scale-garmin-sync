@@ -109,6 +109,7 @@ function topics(prefix: string, deviceId: string) {
     connected: `${base}/connected`,
     disconnect: `${base}/disconnect`,
     disconnected: `${base}/disconnected`,
+    error: `${base}/error`,
   };
 }
 
@@ -353,6 +354,7 @@ async function mqttGattConnect(
 ): Promise<{ charMap: Map<string, BleChar>; device: MqttBleDevice }> {
   await client.subscribeAsync(t.connected);
   await client.subscribeAsync(t.disconnected);
+  await client.subscribeAsync(t.error);
 
   const response = await withTimeout(
     new Promise<{ chars: Array<{ uuid: string; properties: string[] }> }>((resolve, reject) => {
@@ -364,6 +366,10 @@ async function mqttGattConnect(
           } catch (err) {
             reject(new Error(`Invalid connected payload from ESP32: ${err}`));
           }
+        }
+        if (topic === t.error) {
+          client.removeListener('message', handler);
+          reject(new Error(`ESP32 error: ${payload.toString()}`));
         }
       };
       client.on('message', handler);
