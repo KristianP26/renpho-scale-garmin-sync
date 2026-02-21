@@ -15,6 +15,7 @@ vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
 // ─── Mock MQTT client ────────────────────────────────────────────────────────
 
 interface MockMqttClient {
+  connected: boolean;
   on: ReturnType<typeof vi.fn>;
   removeListener: ReturnType<typeof vi.fn>;
   subscribe: ReturnType<typeof vi.fn>;
@@ -31,6 +32,7 @@ function createMockMqttClient(): MockMqttClient {
   const listeners = new Map<string, Array<(topic: string, payload: Buffer) => void>>();
 
   const client: MockMqttClient = {
+    connected: true,
     _listeners: listeners,
     on: vi.fn((event: string, handler: (topic: string, payload: Buffer) => void) => {
       if (!listeners.has(event)) listeners.set(event, []);
@@ -130,6 +132,9 @@ const {
   publishDisplayReading,
   publishDisplayResult,
   setDisplayUsers,
+  AsyncQueue,
+  ReadingWatcher,
+  _resetPersistentClient,
 } = await import('../../src/ble/handler-mqtt-proxy.js');
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -172,6 +177,7 @@ function wireBroadcastFlow(
 
 beforeEach(() => {
   vi.clearAllMocks();
+  _resetPersistentClient();
   mockClient = createMockMqttClient();
 });
 
@@ -643,6 +649,248 @@ describe('handler-mqtt-proxy', () => {
       );
       expect(payload.exports[0].ok).toBe(false);
       expect(payload.exports[1].ok).toBe(true);
+    });
+  });
+
+  describe('AsyncQueue', () => {
+    it('returns buffered items in FIFO order', async () => {
+      const q = new AsyncQueue<number>();
+      q.push(1);
+      q.push(2);
+      q.push(3);
+      expect(await q.shift()).toBe(1);
+      expect(await q.shift()).toBe(2);
+      expect(await q.shift()).toBe(3);
+    });
+
+    it('blocks shift() until push()', async () => {
+      const q = new AsyncQueue<string>();
+      const promise = q.shift();
+      // Should not resolve yet
+      let resolved = false;
+      promise.then(() => {
+        resolved = true;
+      });
+      await new Promise((r) => setTimeout(r, 10));
+      expect(resolved).toBe(false);
+
+      q.push('hello');
+      expect(await promise).toBe('hello');
+    });
+
+    it('supports abort signal on shift()', async () => {
+      const q = new AsyncQueue<number>();
+      const ac = new AbortController();
+      const promise = q.shift(ac.signal);
+      ac.abort();
+      await expect(promise).rejects.toThrow();
+    });
+
+    it('rejects immediately if signal already aborted', async () => {
+      const q = new AsyncQueue<number>();
+      const ac = new AbortController();
+      ac.abort();
+      await expect(q.shift(ac.signal)).rejects.toThrow();
+    });
+
+    it('tracks pending count', () => {
+      const q = new AsyncQueue<number>();
+      expect(q.pending).toBe(0);
+      q.push(1);
+      q.push(2);
+      expect(q.pending).toBe(2);
+    });
+  });
+
+  describe('ReadingWatcher', () => {
+    it('start subscribes with QoS 1 and pushes matched readings to queue', async () => {
+      const adapter = createBroadcastAdapter();
+      const watcher = new ReadingWatcher(MQTT_PROXY_CONFIG, [adapter]);
+
+      await watcher.start();
+
+      // Verify subscribeAsync was called with QoS 1 for scan results
+      expect(mockClient.subscribeAsync).toHaveBeenCalledWith(`${PREFIX}/scan/results`, { qos: 1 });
+      expect(mockClient.subscribeAsync).toHaveBeenCalledWith(`${PREFIX}/status`);
+
+      // Simulate a scan result message
+      mockClient._simulateMessage(
+        `${PREFIX}/scan/results`,
+        JSON.stringify([
+          {
+            address: 'AA:BB:CC:DD:EE:FF',
+            name: '',
+            rssi: -50,
+            services: [],
+            manufacturer_id: 0xffff,
+            manufacturer_data: mfrHex(7550),
+          },
+        ]),
+      );
+
+      const raw = await watcher.nextReading();
+      expect(raw.reading.weight).toBe(75.5);
+      expect(raw.adapter.name).toBe('BroadcastScale');
+    });
+
+    it('deduplicates readings within 30s window', async () => {
+      const adapter = createBroadcastAdapter();
+      const watcher = new ReadingWatcher(MQTT_PROXY_CONFIG, [adapter]);
+      await watcher.start();
+
+      const scanMsg = JSON.stringify([
+        {
+          address: 'AA:BB:CC:DD:EE:FF',
+          name: '',
+          rssi: -50,
+          services: [],
+          manufacturer_id: 0xffff,
+          manufacturer_data: mfrHex(7550),
+        },
+      ]);
+
+      // First message should be queued
+      mockClient._simulateMessage(`${PREFIX}/scan/results`, scanMsg);
+      const raw = await watcher.nextReading();
+      expect(raw.reading.weight).toBe(75.5);
+
+      // Second identical message should be deduped (not queued)
+      mockClient._simulateMessage(`${PREFIX}/scan/results`, scanMsg);
+
+      // Send a different weight — should NOT be deduped
+      mockClient._simulateMessage(
+        `${PREFIX}/scan/results`,
+        JSON.stringify([
+          {
+            address: 'AA:BB:CC:DD:EE:FF',
+            name: '',
+            rssi: -50,
+            services: [],
+            manufacturer_id: 0xffff,
+            manufacturer_data: mfrHex(8000), // 80.0 kg — different weight
+          },
+        ]),
+      );
+
+      const raw2 = await watcher.nextReading();
+      expect(raw2.reading.weight).toBe(80.0);
+    });
+
+    it('logs parse errors instead of swallowing', async () => {
+      const adapter = createBroadcastAdapter();
+      const watcher = new ReadingWatcher(MQTT_PROXY_CONFIG, [adapter]);
+      await watcher.start();
+
+      // Send invalid JSON
+      mockClient._simulateMessage(`${PREFIX}/scan/results`, 'not-json');
+
+      // Should not throw or crash — just log
+      // Verify by sending a valid message after and confirming it's received
+      mockClient._simulateMessage(
+        `${PREFIX}/scan/results`,
+        JSON.stringify([
+          {
+            address: 'AA:BB:CC:DD:EE:FF',
+            name: '',
+            rssi: -50,
+            services: [],
+            manufacturer_id: 0xffff,
+            manufacturer_data: mfrHex(7550),
+          },
+        ]),
+      );
+
+      const raw = await watcher.nextReading();
+      expect(raw.reading.weight).toBe(75.5);
+    });
+
+    it('abort signal on nextReading()', async () => {
+      const adapter = createBroadcastAdapter();
+      const watcher = new ReadingWatcher(MQTT_PROXY_CONFIG, [adapter]);
+      await watcher.start();
+
+      const ac = new AbortController();
+      const promise = watcher.nextReading(ac.signal);
+      ac.abort();
+      await expect(promise).rejects.toThrow();
+    });
+
+    it('updateConfig changes adapter matching', async () => {
+      const adapter1 = createBroadcastAdapter('Scale1');
+      const adapter2 = createBroadcastAdapter('Scale2');
+
+      const watcher = new ReadingWatcher(MQTT_PROXY_CONFIG, [adapter1]);
+      await watcher.start();
+
+      // Update to use adapter2
+      watcher.updateConfig([adapter2]);
+
+      mockClient._simulateMessage(
+        `${PREFIX}/scan/results`,
+        JSON.stringify([
+          {
+            address: 'AA:BB:CC:DD:EE:FF',
+            name: '',
+            rssi: -50,
+            services: [],
+            manufacturer_id: 0xffff,
+            manufacturer_data: mfrHex(7550),
+          },
+        ]),
+      );
+
+      const raw = await watcher.nextReading();
+      expect(raw.adapter.name).toBe('Scale2');
+    });
+
+    it('guards against double-start', async () => {
+      const adapter = createBroadcastAdapter();
+      const watcher = new ReadingWatcher(MQTT_PROXY_CONFIG, [adapter]);
+
+      await watcher.start();
+      const callCount = mockClient.subscribeAsync.mock.calls.length;
+
+      await watcher.start(); // should be a no-op
+      expect(mockClient.subscribeAsync.mock.calls.length).toBe(callCount);
+    });
+
+    it('filters by targetMac', async () => {
+      const adapter = createBroadcastAdapter();
+      const watcher = new ReadingWatcher(MQTT_PROXY_CONFIG, [adapter], 'AA:BB:CC:DD:EE:FF');
+      await watcher.start();
+
+      // Send a result with wrong MAC — should not match
+      mockClient._simulateMessage(
+        `${PREFIX}/scan/results`,
+        JSON.stringify([
+          {
+            address: '11:22:33:44:55:66',
+            name: '',
+            rssi: -50,
+            services: [],
+            manufacturer_id: 0xffff,
+            manufacturer_data: mfrHex(6000),
+          },
+        ]),
+      );
+
+      // Send a result with correct MAC — should match
+      mockClient._simulateMessage(
+        `${PREFIX}/scan/results`,
+        JSON.stringify([
+          {
+            address: 'AA:BB:CC:DD:EE:FF',
+            name: '',
+            rssi: -50,
+            services: [],
+            manufacturer_id: 0xffff,
+            manufacturer_data: mfrHex(7550),
+          },
+        ]),
+      );
+
+      const raw = await watcher.nextReading();
+      expect(raw.reading.weight).toBe(75.5);
     });
   });
 });

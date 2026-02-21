@@ -4,6 +4,52 @@ import type { ScanOptions, ScanResult } from './types.js';
 import type { RawReading } from './shared.js';
 import { bleLog, normalizeUuid, withTimeout } from './types.js';
 
+// ─── AsyncQueue ──────────────────────────────────────────────────────────────
+
+/** Simple async queue: push items, shift blocks until one is available. */
+export class AsyncQueue<T> {
+  private buffer: T[] = [];
+  private waiting: Array<{ resolve: (item: T) => void; reject: (err: Error) => void }> = [];
+
+  /** Enqueue an item, or resolve a waiting consumer. */
+  push(item: T): void {
+    const waiter = this.waiting.shift();
+    if (waiter) {
+      waiter.resolve(item);
+    } else {
+      this.buffer.push(item);
+    }
+  }
+
+  /** Return next item, or block until one arrives. Supports AbortSignal. */
+  shift(signal?: AbortSignal): Promise<T> {
+    if (signal?.aborted) {
+      return Promise.reject(signal.reason ?? new DOMException('Aborted', 'AbortError'));
+    }
+    const buffered = this.buffer.shift();
+    if (buffered !== undefined) return Promise.resolve(buffered);
+
+    return new Promise<T>((resolve, reject) => {
+      const entry = { resolve, reject };
+      this.waiting.push(entry);
+
+      if (signal) {
+        const onAbort = () => {
+          const idx = this.waiting.indexOf(entry);
+          if (idx >= 0) this.waiting.splice(idx, 1);
+          reject(signal.reason ?? new DOMException('Aborted', 'AbortError'));
+        };
+        signal.addEventListener('abort', onAbort, { once: true });
+      }
+    });
+  }
+
+  /** Number of buffered items not yet consumed. */
+  get pending(): number {
+    return this.buffer.length;
+  }
+}
+
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const COMMAND_TIMEOUT_MS = 30_000;
@@ -87,13 +133,18 @@ async function getOrCreatePersistentClient(config: MqttProxyConfig): Promise<Mqt
       clientId: `ble-scale-sync-${config.device_id}`,
       username: config.username ?? undefined,
       password: config.password ?? undefined,
-      clean: true,
+      clean: false,
       reconnectPeriod: 5000,
     }),
     COMMAND_TIMEOUT_MS,
     `MQTT broker unreachable at ${config.broker_url}. Check your mqtt_proxy.broker_url config.`,
   );
   return _persistentClient;
+}
+
+/** Reset the persistent client (for testing only). */
+export function _resetPersistentClient(): void {
+  _persistentClient = null;
 }
 
 /** Get the persistent client if connected, otherwise create an ephemeral one. */
@@ -261,69 +312,114 @@ export async function scanAndRead(opts: ScanOptions): Promise<BodyComposition> {
   return adapter.computeMetrics(reading, opts.profile);
 }
 
+// ─── ReadingWatcher (always-on message handler with async queue) ─────────────
+
+const DEDUP_WINDOW_MS = 30_000;
+
 /**
- * Persistent event-driven scan listener for continuous mode.
- * Keeps the MQTT connection alive and resolves as soon as a matching
- * broadcast reading arrives. Waits indefinitely (controlled by abortSignal).
+ * Persistent event-driven scan watcher for continuous mode.
+ * Subscribes once and keeps the message handler attached permanently,
+ * queuing matched readings so none are missed during processing or cooldown.
  */
-export async function watchForReadings(opts: ScanOptions): Promise<RawReading> {
-  const config = opts.mqttProxy;
-  if (!config) throw new Error('mqtt_proxy config is required for mqtt-proxy handler');
+export class ReadingWatcher {
+  private queue = new AsyncQueue<RawReading>();
+  private started = false;
+  private adapters: ScaleAdapter[];
+  private targetMac?: string;
+  private config: MqttProxyConfig;
+  private dedup = new Map<string, number>();
 
-  const { targetMac, adapters, abortSignal } = opts;
-  const t = topics(config.topic_prefix, config.device_id);
+  constructor(config: MqttProxyConfig, adapters: ScaleAdapter[], targetMac?: string) {
+    this.config = config;
+    this.adapters = adapters;
+    this.targetMac = targetMac;
+  }
 
-  const client = await getOrCreatePersistentClient(config);
-  await waitForEsp32Online(client, t);
-  bleLog.info('ESP32 proxy is online');
-  await client.subscribeAsync(t.scanResults);
+  async start(): Promise<void> {
+    if (this.started) return;
 
-  return new Promise<RawReading>((resolve, reject) => {
-    const onAbort = () => {
-      cleanup();
-      reject(new DOMException('Aborted', 'AbortError'));
-    };
-    abortSignal?.addEventListener('abort', onAbort, { once: true });
+    const t = topics(this.config.topic_prefix, this.config.device_id);
+    const client = await getOrCreatePersistentClient(this.config);
 
-    const handler = (topic: string, payload: Buffer) => {
+    // Mark started only after successful connection
+    this.started = true;
+
+    // Lifecycle logging
+    client.on('reconnect', () => bleLog.info('MQTT reconnecting...'));
+    client.on('offline', () => bleLog.warn('MQTT client offline'));
+    client.on('error', (err) => bleLog.warn(`MQTT error: ${err.message}`));
+    client.on('connect', () => bleLog.info('MQTT connected'));
+
+    // Subscribe to scan results with QoS 1
+    await client.subscribeAsync(t.scanResults, { qos: 1 });
+    // Subscribe to status for logging only
+    await client.subscribeAsync(t.status);
+    bleLog.info('ReadingWatcher started — listening for scan results');
+
+    // Permanent message handler
+    client.on('message', (topic: string, payload: Buffer) => {
+      if (topic === t.status) {
+        bleLog.info(`ESP32 status: ${payload.toString()}`);
+        return;
+      }
       if (topic !== t.scanResults) return;
+
       try {
         const results: ScanResultEntry[] = JSON.parse(payload.toString());
-        const candidates = targetMac
-          ? results.filter((e) => e.address.toLowerCase() === targetMac.toLowerCase())
+        const candidates = this.targetMac
+          ? results.filter((e) => e.address.toLowerCase() === this.targetMac!.toLowerCase())
           : results;
 
         for (const entry of candidates) {
           const info = toBleDeviceInfo(entry);
-          const adapter = adapters.find((a) => a.matches(info));
+          const adapter = this.adapters.find((a) => a.matches(info));
           if (!adapter) continue;
 
           if (adapter.parseBroadcast && entry.manufacturer_data) {
             const reading = adapter.parseBroadcast(Buffer.from(entry.manufacturer_data, 'hex'));
             if (reading) {
-              cleanup();
+              // Dedup check
+              const key = `${entry.address}:${reading.weight.toFixed(1)}`;
+              const now = Date.now();
+              this.pruneDedup(now);
+              const lastSeen = this.dedup.get(key);
+              if (lastSeen && now - lastSeen < DEDUP_WINDOW_MS) {
+                bleLog.debug(`Dedup skip: ${key} (${((now - lastSeen) / 1000).toFixed(1)}s ago)`);
+                return;
+              }
+              this.dedup.set(key, now);
+
               bleLog.info(`Matched: ${adapter.name} (${entry.address})`);
               bleLog.info(`Broadcast reading: ${reading.weight} kg`);
-              registerScaleMac(config, entry.address).catch(() => {});
-              resolve({ reading, adapter });
+              registerScaleMac(this.config, entry.address).catch(() => {});
+              this.queue.push({ reading, adapter });
               return;
             }
           }
         }
-        // No match this scan — keep listening for the next one
-      } catch {
-        /* ignore parse errors, keep listening */
+        // No match this scan — keep listening
+      } catch (err) {
+        bleLog.warn(`Failed to parse scan results: ${err instanceof Error ? err.message : err}`);
       }
-    };
+    });
+  }
 
-    client.on('message', handler);
+  /** Consume the next reading from the queue. Blocks until one arrives. */
+  nextReading(signal?: AbortSignal): Promise<RawReading> {
+    return this.queue.shift(signal);
+  }
 
-    function cleanup() {
-      client.removeListener('message', handler);
-      abortSignal?.removeEventListener('abort', onAbort);
-      // Don't unsubscribe or disconnect — keep listening for next cycle
+  /** Update matching config (e.g. after SIGHUP config reload). */
+  updateConfig(adapters: ScaleAdapter[], targetMac?: string): void {
+    this.adapters = adapters;
+    this.targetMac = targetMac;
+  }
+
+  private pruneDedup(now: number): void {
+    for (const [key, ts] of this.dedup) {
+      if (now - ts >= DEDUP_WINDOW_MS) this.dedup.delete(key);
     }
-  });
+  }
 }
 
 /** Tracked scale MACs discovered via adapter matching. */

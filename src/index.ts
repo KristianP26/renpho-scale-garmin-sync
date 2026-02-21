@@ -2,7 +2,7 @@
 
 import { parseArgs } from 'node:util';
 import { writeFileSync } from 'node:fs';
-import { scanAndReadRaw, watchForReadings } from './ble/index.js';
+import { scanAndReadRaw, ReadingWatcher } from './ble/index.js';
 import type { RawReading } from './ble/index.js';
 import {
   publishBeep,
@@ -410,30 +410,26 @@ async function main(): Promise<void> {
   let backoffMs = 0; // 0 = no failure yet
 
   if (bleHandler === 'mqtt-proxy' && mqttProxy) {
-    // Event-driven: persistent MQTT connection reacts to scan results as they arrive
-    const defaultProfile = resolveUserProfile(appConfig.users[0], appConfig.scale);
+    // Event-driven: persistent MQTT connection with always-on message handler
+    const watcher = new ReadingWatcher(mqttProxy, adapters, SCALE_MAC);
 
     while (!signal.aborted) {
       try {
         touchHeartbeat();
 
+        // Start watcher (no-op if already started)
+        await watcher.start();
+
         if (needsReload) {
           await reloadConfig();
           needsReload = false;
+          watcher.updateConfig(adapters, SCALE_MAC);
           if (appConfig.users.length === 1 && !dryRun) {
             exporters = buildSingleUserExporters();
           }
         }
 
-        const raw = await watchForReadings({
-          targetMac: SCALE_MAC,
-          adapters,
-          profile: defaultProfile,
-          weightUnit,
-          abortSignal: signal,
-          bleHandler,
-          mqttProxy,
-        });
+        const raw = await watcher.nextReading(signal);
 
         if (appConfig.users.length > 1) {
           await processRawReading(raw);
@@ -442,15 +438,10 @@ async function main(): Promise<void> {
         }
 
         backoffMs = 0;
-
-        if (signal.aborted) break;
-        const cooldown = appConfig.runtime?.scan_cooldown ?? scanCooldownSec;
-        log.info(`\nWaiting ${cooldown}s before next scan...`);
-        await abortableSleep(cooldown * 1000, signal);
       } catch (err) {
         if (signal.aborted) break;
         backoffMs = backoffMs === 0 ? BACKOFF_INITIAL_MS : Math.min(backoffMs * 2, BACKOFF_MAX_MS);
-        log.info(`No scale found, retrying in ${backoffMs / 1000}s... (${errMsg(err)})`);
+        log.info(`Error processing reading, retrying in ${backoffMs / 1000}s... (${errMsg(err)})`);
         await abortableSleep(backoffMs, signal).catch(() => {});
       }
     }
