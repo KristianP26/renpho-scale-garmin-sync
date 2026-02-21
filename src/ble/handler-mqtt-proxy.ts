@@ -1,8 +1,14 @@
-import type { ScaleAdapter, BleDeviceInfo, BodyComposition } from '../interfaces/scale-adapter.js';
+import type {
+  ScaleAdapter,
+  BleDeviceInfo,
+  BodyComposition,
+  UserProfile,
+} from '../interfaces/scale-adapter.js';
 import type { MqttProxyConfig } from '../config/schema.js';
 import type { ScanOptions, ScanResult } from './types.js';
-import type { RawReading } from './shared.js';
-import { bleLog, normalizeUuid, withTimeout } from './types.js';
+import type { BleChar, BleDevice, RawReading } from './shared.js';
+import { waitForRawReading } from './shared.js';
+import { bleLog, normalizeUuid, withTimeout, errMsg } from './types.js';
 
 // ─── AsyncQueue ──────────────────────────────────────────────────────────────
 
@@ -30,11 +36,18 @@ export class AsyncQueue<T> {
     if (buffered !== undefined) return Promise.resolve(buffered);
 
     return new Promise<T>((resolve, reject) => {
-      const entry = { resolve, reject };
+      let onAbort: (() => void) | undefined;
+      const entry = {
+        resolve: (item: T) => {
+          if (onAbort) signal!.removeEventListener('abort', onAbort);
+          resolve(item);
+        },
+        reject,
+      };
       this.waiting.push(entry);
 
       if (signal) {
-        const onAbort = () => {
+        onAbort = () => {
           const idx = this.waiting.indexOf(entry);
           if (idx >= 0) this.waiting.splice(idx, 1);
           reject(signal.reason ?? new DOMException('Aborted', 'AbortError'));
@@ -91,6 +104,11 @@ function topics(prefix: string, deviceId: string) {
     scanResults: `${base}/scan/results`,
     config: `${base}/config`,
     beep: `${base}/beep`,
+    // GATT proxy topics
+    connect: `${base}/connect`,
+    connected: `${base}/connected`,
+    disconnect: `${base}/disconnect`,
+    disconnected: `${base}/disconnected`,
   };
 }
 
@@ -148,7 +166,9 @@ export function _resetPersistentClient(): void {
 }
 
 /** Get the persistent client if connected, otherwise create an ephemeral one. */
-async function getClient(config: MqttProxyConfig): Promise<{ client: MqttClient; ephemeral: boolean }> {
+async function getClient(
+  config: MqttProxyConfig,
+): Promise<{ client: MqttClient; ephemeral: boolean }> {
   if (_persistentClient?.connected) {
     return { client: _persistentClient, ephemeral: false };
   }
@@ -194,7 +214,10 @@ async function waitForEsp32Online(client: MqttClient, t: ReturnType<typeof topic
         // After grace period, if we saw offline, reject early
         new Promise<never>((_res, rej) =>
           setTimeout(() => {
-            if (sawOffline) rej(new Error('ESP32 proxy is offline. Check the device and its WiFi/MQTT connection.'));
+            if (sawOffline)
+              rej(
+                new Error('ESP32 proxy is offline. Check the device and its WiFi/MQTT connection.'),
+              );
           }, OFFLINE_GRACE_MS),
         ),
       ]),
@@ -241,6 +264,129 @@ async function mqttScan(
   }
 }
 
+// ─── GATT over MQTT ──────────────────────────────────────────────────────────
+
+/** Implements BleChar from shared.ts over MQTT topics. */
+class MqttBleChar implements BleChar {
+  constructor(
+    private client: MqttClient,
+    private base: string,
+    private uuid: string,
+  ) {}
+
+  async subscribe(onData: (data: Buffer) => void): Promise<() => void> {
+    const topic = `${this.base}/notify/${this.uuid}`;
+    const handler = (t: string, payload: Buffer) => {
+      if (t === topic) onData(payload);
+    };
+    this.client.on('message', handler);
+    await this.client.subscribeAsync(topic);
+    return () => {
+      this.client.removeListener('message', handler);
+    };
+  }
+
+  async write(data: Buffer, _withResponse: boolean): Promise<void> {
+    await this.client.publishAsync(`${this.base}/write/${this.uuid}`, data);
+  }
+
+  async read(): Promise<Buffer> {
+    const responseTopic = `${this.base}/read/${this.uuid}/response`;
+    const handler = (t: string, payload: Buffer) => {
+      if (t === responseTopic) {
+        this.client.removeListener('message', handler);
+        resolveOuter(payload);
+      }
+    };
+    let resolveOuter!: (buf: Buffer) => void;
+    let rejectOuter!: (err: Error) => void;
+    const promise = new Promise<Buffer>((resolve, reject) => {
+      resolveOuter = resolve;
+      rejectOuter = reject;
+    });
+    this.client.on('message', handler);
+    try {
+      await this.client.subscribeAsync(responseTopic);
+      await this.client.publishAsync(`${this.base}/read/${this.uuid}`, '');
+      return await withTimeout(
+        promise,
+        COMMAND_TIMEOUT_MS,
+        `Read response timeout for ${this.uuid}`,
+      );
+    } catch (err) {
+      this.client.removeListener('message', handler);
+      throw err;
+    }
+  }
+}
+
+/** Implements BleDevice from shared.ts — watches for MQTT disconnect events. */
+class MqttBleDevice implements BleDevice {
+  private disconnectCb?: () => void;
+  private handler?: (topic: string, payload: Buffer) => void;
+
+  constructor(
+    private client: MqttClient,
+    private disconnectedTopic: string,
+  ) {
+    this.handler = (topic) => {
+      if (topic === this.disconnectedTopic) this.disconnectCb?.();
+    };
+    client.on('message', this.handler);
+  }
+
+  onDisconnect(callback: () => void): void {
+    this.disconnectCb = callback;
+  }
+
+  cleanup(): void {
+    if (this.handler) this.client.removeListener('message', this.handler);
+  }
+}
+
+/** Send GATT connect command over MQTT and wait for the connected response with char list. */
+async function mqttGattConnect(
+  client: MqttClient,
+  t: ReturnType<typeof topics>,
+  address: string,
+  addrType: number,
+): Promise<{ charMap: Map<string, BleChar>; device: MqttBleDevice }> {
+  await client.subscribeAsync(t.connected);
+  await client.subscribeAsync(t.disconnected);
+
+  const response = await withTimeout(
+    new Promise<{ chars: Array<{ uuid: string; properties: string[] }> }>((resolve, reject) => {
+      const handler = (topic: string, payload: Buffer) => {
+        if (topic === t.connected) {
+          client.removeListener('message', handler);
+          try {
+            resolve(JSON.parse(payload.toString()));
+          } catch (err) {
+            reject(new Error(`Invalid connected payload from ESP32: ${err}`));
+          }
+        }
+      };
+      client.on('message', handler);
+      client.publishAsync(t.connect, JSON.stringify({ address, addr_type: addrType }));
+    }),
+    COMMAND_TIMEOUT_MS,
+    `GATT connect timeout for ${address}`,
+  );
+
+  const charMap = new Map<string, BleChar>();
+  for (const char of response.chars) {
+    charMap.set(char.uuid, new MqttBleChar(client, t.base, char.uuid));
+  }
+
+  const device = new MqttBleDevice(client, t.disconnected);
+  return { charMap, device };
+}
+
+/** Send GATT disconnect command over MQTT. */
+async function mqttGattDisconnect(client: MqttClient, t: ReturnType<typeof topics>): Promise<void> {
+  await client.publishAsync(t.disconnect, '');
+}
+
 // ─── Exports ──────────────────────────────────────────────────────────────────
 
 /**
@@ -273,7 +419,6 @@ export async function scanAndReadRaw(opts: ScanOptions): Promise<RawReading> {
       if (!adapter) continue;
 
       bleLog.info(`Matched: ${adapter.name} (${entry.name || entry.address})`);
-      registerScaleMac(config, entry.address).catch(() => {});
 
       // Extract reading from broadcast advertisement data
       if (adapter.parseBroadcast && entry.manufacturer_data) {
@@ -281,14 +426,34 @@ export async function scanAndReadRaw(opts: ScanOptions): Promise<RawReading> {
         const reading = adapter.parseBroadcast(mfrBuf);
         if (reading) {
           bleLog.info(`Broadcast reading: ${reading.weight} kg`);
+          registerScaleMac(config, entry.address).catch(() => {});
           return { reading, adapter };
         }
       }
 
-      throw new Error(
-        `Scale ${adapter.name} found at ${entry.address} but no broadcast data available. ` +
-          `Ensure the scale is actively transmitting.`,
+      // GATT fallback — adapter matched but no broadcast data
+      bleLog.info(`No broadcast data for ${adapter.name}; connecting via GATT proxy...`);
+      const { charMap, device } = await mqttGattConnect(
+        client,
+        t,
+        entry.address,
+        entry.addr_type ?? 0,
       );
+      try {
+        const raw = await waitForRawReading(
+          charMap,
+          device,
+          adapter,
+          opts.profile,
+          opts.weightUnit,
+          opts.onLiveData,
+        );
+        registerScaleMac(config, entry.address).catch(() => {});
+        return raw;
+      } finally {
+        device.cleanup();
+        await mqttGattDisconnect(client, t).catch(() => {});
+      }
     }
 
     throw new Error(
@@ -327,12 +492,20 @@ export class ReadingWatcher {
   private adapters: ScaleAdapter[];
   private targetMac?: string;
   private config: MqttProxyConfig;
+  private profile?: UserProfile;
   private dedup = new Map<string, number>();
+  private gattInProgress = false;
 
-  constructor(config: MqttProxyConfig, adapters: ScaleAdapter[], targetMac?: string) {
+  constructor(
+    config: MqttProxyConfig,
+    adapters: ScaleAdapter[],
+    targetMac?: string,
+    profile?: UserProfile,
+  ) {
     this.config = config;
     this.adapters = adapters;
     this.targetMac = targetMac;
+    this.profile = profile;
   }
 
   async start(): Promise<void> {
@@ -385,7 +558,7 @@ export class ReadingWatcher {
               const lastSeen = this.dedup.get(key);
               if (lastSeen && now - lastSeen < DEDUP_WINDOW_MS) {
                 bleLog.debug(`Dedup skip: ${key} (${((now - lastSeen) / 1000).toFixed(1)}s ago)`);
-                return;
+                continue; // Don't block other candidates in this scan batch
               }
               this.dedup.set(key, now);
 
@@ -393,9 +566,14 @@ export class ReadingWatcher {
               bleLog.info(`Broadcast reading: ${reading.weight} kg`);
               registerScaleMac(this.config, entry.address).catch(() => {});
               this.queue.push({ reading, adapter });
-              return;
+              continue;
             }
           }
+
+          // GATT fallback — adapter matched but no broadcast data (or parseBroadcast returned null)
+          this.handleGattReading(entry, adapter).catch((err) => {
+            bleLog.warn(`GATT reading failed for ${entry.address}: ${errMsg(err)}`);
+          });
         }
         // No match this scan — keep listening
       } catch (err) {
@@ -410,9 +588,48 @@ export class ReadingWatcher {
   }
 
   /** Update matching config (e.g. after SIGHUP config reload). */
-  updateConfig(adapters: ScaleAdapter[], targetMac?: string): void {
+  updateConfig(adapters: ScaleAdapter[], targetMac?: string, profile?: UserProfile): void {
     this.adapters = adapters;
     this.targetMac = targetMac;
+    if (profile) this.profile = profile;
+  }
+
+  private async handleGattReading(entry: ScanResultEntry, adapter: ScaleAdapter): Promise<void> {
+    if (this.gattInProgress) {
+      bleLog.debug(`GATT connection already in progress, skipping ${entry.address}`);
+      return;
+    }
+    this.gattInProgress = true;
+
+    const t = topics(this.config.topic_prefix, this.config.device_id);
+    const client = await getOrCreatePersistentClient(this.config);
+    const dummyProfile: UserProfile = this.profile ?? {
+      height: 170,
+      age: 30,
+      gender: 'male',
+      isAthlete: false,
+    };
+
+    bleLog.info(`Connecting via GATT proxy to ${adapter.name} (${entry.address})...`);
+    const { charMap, device } = await mqttGattConnect(
+      client,
+      t,
+      entry.address,
+      entry.addr_type ?? 0,
+    );
+    try {
+      const raw = await withTimeout(
+        waitForRawReading(charMap, device, adapter, dummyProfile),
+        60_000,
+        `GATT reading timeout for ${entry.address}`,
+      );
+      registerScaleMac(this.config, entry.address).catch(() => {});
+      this.queue.push(raw);
+    } finally {
+      this.gattInProgress = false;
+      device.cleanup();
+      await mqttGattDisconnect(client, t).catch(() => {});
+    }
   }
 
   private pruneDedup(now: number): void {
@@ -424,6 +641,11 @@ export class ReadingWatcher {
 
 /** Tracked scale MACs discovered via adapter matching. */
 const discoveredScaleMacs = new Set<string>();
+
+/** Reset discovered MACs (for testing only). */
+export function _resetDiscoveredMacs(): void {
+  discoveredScaleMacs.clear();
+}
 
 // ─── Display user info ───────────────────────────────────────────────────────
 

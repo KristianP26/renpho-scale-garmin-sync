@@ -7,7 +7,7 @@ description: Use an ESP32 as a remote BLE-to-MQTT bridge for headless or Docker 
 
 Use a cheap ESP32 board as a remote Bluetooth radio, communicating over MQTT. This lets you run BLE Scale Sync on machines without local Bluetooth - headless servers, Docker containers, or devices where the built-in radio has poor range.
 
-The ESP32 scans autonomously for BLE advertisements and publishes results over MQTT. BLE Scale Sync matches scale adapters against broadcast data, identifies users by weight, computes body composition, and dispatches to exporters. All scale-specific logic stays on the server.
+The ESP32 scans autonomously for BLE advertisements and publishes results over MQTT. BLE Scale Sync matches scale adapters against the scan data, identifies users by weight, computes body composition, and dispatches to exporters. For scales that require a GATT connection, the server sends connect/write/read commands back to the ESP32 over MQTT. All scale-specific logic stays on the server.
 
 ## How It Works
 
@@ -15,8 +15,10 @@ The ESP32 scans autonomously for BLE advertisements and publishes results over M
 ┌─────────┐   BLE    ┌──────────┐   MQTT   ┌────────────────┐
 │  Scale   │ ──────── │  ESP32   │ ──────── │ BLE Scale Sync │
 └─────────┘  advert  └──────────┘          └────────────────┘
-              only   MicroPython              Docker / Node.js
+             + GATT  MicroPython              Docker / Node.js
 ```
+
+**Broadcast scales** (weight in BLE advertisements):
 
 1. The ESP32 continuously scans for BLE advertisements (~every 10s)
 2. Scan results (names, services, manufacturer data) are published to MQTT
@@ -24,17 +26,25 @@ The ESP32 scans autonomously for BLE advertisements and publishes results over M
 4. Body composition is computed and dispatched to exporters
 5. Feedback (beep, display updates) is sent back to the ESP32 via MQTT
 
+**GATT scales** (notification-based readings):
+
+1. A matched adapter has no broadcast data — the server sends a `connect` command
+2. The ESP32 connects to the scale, discovers characteristics, and reports them
+3. The server subscribes to notification topics and sends write commands (e.g. unlock)
+4. Scale readings arrive as notifications, forwarded to the server via MQTT
+5. The server sends a `disconnect` command when the reading is complete
+
 Both **broadcast scales** (weight embedded in BLE advertisements) and **GATT scales** (requiring a connection for notification-based readings) are supported. When a matched adapter has no broadcast data, the proxy automatically falls back to a GATT connection through the ESP32.
 
 ## Supported Boards
 
 Any ESP32 board running MicroPython with BLE support works. Tested on:
 
-| Board | Notes |
-|-------|-------|
-| M5Stack Atom Echo (ESP32-PICO) | Tiny, no PSRAM, ~100 KB free RAM, I2S buzzer for beep feedback |
-| ESP32-S3-DevKitC | Standard dev board, plenty of RAM |
-| Guition ESP32-S3-4848S040 | 480x480 RGB display, shows scan status and export results via LVGL UI |
+| Board                          | Notes                                                                 |
+| ------------------------------ | --------------------------------------------------------------------- |
+| M5Stack Atom Echo (ESP32-PICO) | Tiny, no PSRAM, ~100 KB free RAM, I2S buzzer for beep feedback        |
+| ESP32-S3-DevKitC               | Standard dev board, plenty of RAM                                     |
+| Guition ESP32-S3-4848S040      | 480x480 RGB display, shows scan status and export results via LVGL UI |
 
 The board is auto-detected from the chip family. Set `"board"` in `config.json` to override (e.g. `"guition_4848"` for the display board, `"atom_echo"` for the Atom Echo).
 
@@ -105,9 +115,11 @@ Some boards need a slower baud rate. If flashing fails, edit `BAUD=115200` in `f
 
 ::: tip ESP32-S3-4848 (display board)
 This board requires custom LVGL MicroPython firmware. See [PORTING.md](../../PORTING.md) for build instructions:
+
 ```bash
 cd drivers && ./build.sh guition_4848
 ```
+
 :::
 
 ### 3. Verify
@@ -119,6 +131,7 @@ mpremote connect /dev/ttyUSB0 repl
 ```
 
 You should see:
+
 ```
 BLE-MQTT bridge ready: ble-proxy/esp32-ble-proxy
 ```
@@ -139,8 +152,8 @@ ble:
   handler: mqtt-proxy
   mqtt_proxy:
     broker_url: 'mqtt://192.168.1.100:1883'
-    device_id: esp32-ble-proxy        # must match config.json
-    topic_prefix: ble-proxy           # must match config.json
+    device_id: esp32-ble-proxy # must match config.json
+    topic_prefix: ble-proxy # must match config.json
     # username: myuser                # optional, if broker requires auth
     # password: '${MQTT_PASSWORD}'    # optional
 ```
@@ -186,15 +199,23 @@ firmware/
 
 All topics are prefixed with `{topic_prefix}/{device_id}/` (default: `ble-proxy/esp32-ble-proxy/`).
 
-| Topic | Direction | Payload |
-|-------|-----------|---------|
-| `status` | ESP32 -> Server | `"online"` / `"offline"` (retained, LWT) |
-| `error` | ESP32 -> Server | Error message string |
-| `scan/results` | ESP32 -> Server | JSON array of discovered devices |
-| `config` | Server -> ESP32 | `{"scales": ["AA:BB:..."], "users": [...]}` (retained) |
-| `beep` | Server -> ESP32 | `""` or `{"freq": 1000, "duration": 200, "repeat": 1}` |
-| `display/reading` | Server -> ESP32 | `{"slug", "name", "weight", "impedance", "exporters"}` |
-| `display/result` | Server -> ESP32 | `{"slug", "name", "weight", "exports": [{"name", "ok"}]}` |
+| Topic                  | Direction       | Payload                                                   |
+| ---------------------- | --------------- | --------------------------------------------------------- |
+| `status`               | ESP32 -> Server | `"online"` / `"offline"` (retained, LWT)                  |
+| `error`                | ESP32 -> Server | Error message string                                      |
+| `scan/results`         | ESP32 -> Server | JSON array of discovered devices                          |
+| `config`               | Server -> ESP32 | `{"scales": ["AA:BB:..."], "users": [...]}` (retained)    |
+| `beep`                 | Server -> ESP32 | `""` or `{"freq": 1000, "duration": 200, "repeat": 1}`    |
+| `display/reading`      | Server -> ESP32 | `{"slug", "name", "weight", "impedance", "exporters"}`    |
+| `display/result`       | Server -> ESP32 | `{"slug", "name", "weight", "exports": [{"name", "ok"}]}` |
+| `connect`              | Server -> ESP32 | `{"address": "AA:BB:...", "addr_type": 0}`                |
+| `connected`            | ESP32 -> Server | `{"chars": [{"uuid": "...", "properties": [...]}]}`       |
+| `disconnect`           | Server -> ESP32 | (any)                                                     |
+| `disconnected`         | ESP32 -> Server | (empty)                                                   |
+| `notify/{uuid}`        | ESP32 -> Server | Raw binary (characteristic notification)                  |
+| `write/{uuid}`         | Server -> ESP32 | Raw binary (characteristic write)                         |
+| `read/{uuid}`          | Server -> ESP32 | (empty, triggers read)                                    |
+| `read/{uuid}/response` | ESP32 -> Server | Raw binary (read result)                                  |
 
 ## Troubleshooting
 
@@ -206,6 +227,7 @@ All topics are prefixed with `{topic_prefix}/{device_id}/` (default: `ble-proxy/
 ### WiFi won't reconnect after BLE scan
 
 On shared-radio boards (ESP32-PICO), the firmware deactivates BLE after each scan to free the 2.4 GHz radio. If WiFi still fails:
+
 - Check that your WiFi router is on a 2.4 GHz band (5 GHz won't work with ESP32)
 - Try reducing `SCAN_DURATION_MS` in the board config
 
@@ -218,6 +240,7 @@ The first scan after boot may take longer because the ESP32 needs to establish t
 ### Out of memory on ESP32-PICO / Atom Echo
 
 Boards without PSRAM have ~100 KB free after boot. If you see `MemoryError`:
+
 - The firmware already deduplicates scan results and runs `gc.collect()` aggressively
 - Reduce `SCAN_DURATION_MS` in `board_atom_echo.py` to find fewer devices
 - Avoid running other MicroPython code alongside the bridge

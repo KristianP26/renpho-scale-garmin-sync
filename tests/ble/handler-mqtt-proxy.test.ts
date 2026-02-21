@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type {
   ScaleAdapter,
+  ScaleReading,
   BodyComposition,
   UserProfile,
   BleDeviceInfo,
@@ -119,6 +120,32 @@ function createBroadcastAdapter(name = 'BroadcastScale'): ScaleAdapter {
   };
 }
 
+/** GATT-only adapter: matches by name, no parseBroadcast, uses notifications. */
+const GATT_NOTIFY_UUID = '0000fff400001000800000805f9b34fb';
+const GATT_WRITE_UUID = '0000fff100001000800000805f9b34fb';
+
+function createGattAdapter(name = 'GattScale'): ScaleAdapter {
+  let reading: ScaleReading | null = null;
+  return {
+    name,
+    charNotifyUuid: GATT_NOTIFY_UUID,
+    charWriteUuid: GATT_WRITE_UUID,
+    unlockCommand: [0xa5, 0x01],
+    unlockIntervalMs: 2000,
+    matches: vi.fn((info: BleDeviceInfo) => info.localName === 'GattScale'),
+    parseNotification: vi.fn((data: Buffer) => {
+      // Simple protocol: 2-byte LE weight in centikg, 2-byte LE impedance
+      if (data.length >= 4) {
+        reading = { weight: data.readUInt16LE(0) / 100, impedance: data.readUInt16LE(2) };
+        return reading;
+      }
+      return null;
+    }),
+    isComplete: vi.fn(() => reading !== null && reading.impedance > 0),
+    computeMetrics: vi.fn(() => BODY_COMP),
+  };
+}
+
 // ─── Import the module under test ────────────────────────────────────────────
 
 // Must import AFTER vi.mock
@@ -135,6 +162,7 @@ const {
   AsyncQueue,
   ReadingWatcher,
   _resetPersistentClient,
+  _resetDiscoveredMacs,
 } = await import('../../src/ble/handler-mqtt-proxy.js');
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -178,6 +206,7 @@ function wireBroadcastFlow(
 beforeEach(() => {
   vi.clearAllMocks();
   _resetPersistentClient();
+  _resetDiscoveredMacs();
   mockClient = createMockMqttClient();
 });
 
@@ -250,30 +279,88 @@ describe('handler-mqtt-proxy', () => {
       ).rejects.toThrow('mqtt_proxy config is required');
     });
 
-    it('rejects when adapter matches but no broadcast data', async () => {
-      // Adapter that matches by name but has parseBroadcast — no mfr data in scan
-      const adapter = createBroadcastAdapter();
-      (adapter.matches as ReturnType<typeof vi.fn>).mockImplementation(
-        (info: BleDeviceInfo) => info.localName === 'MyScale',
+    it('falls back to GATT when adapter matches but no broadcast data', async () => {
+      const adapter = createGattAdapter();
+
+      // Wire up: online → scan results (no mfr data) → GATT connect response → notification
+      // Key: connected response must be triggered by publishAsync(connect), not subscribeAsync(connected),
+      // because mqttGattConnect registers the handler AFTER subscribing but BEFORE publishing.
+      mockClient.subscribeAsync = vi.fn(async (topic: string) => {
+        if (topic === `${PREFIX}/status`) {
+          queueMicrotask(() => mockClient._simulateMessage(`${PREFIX}/status`, 'online'));
+        }
+        if (topic === `${PREFIX}/scan/results`) {
+          queueMicrotask(() =>
+            mockClient._simulateMessage(
+              `${PREFIX}/scan/results`,
+              JSON.stringify([
+                {
+                  address: 'AA:BB:CC:DD:EE:FF',
+                  name: 'GattScale',
+                  rssi: -50,
+                  services: [],
+                  addr_type: 0,
+                },
+              ]),
+            ),
+          );
+        }
+        return [];
+      });
+
+      // Intercept publishAsync to simulate ESP32 GATT responses
+      const origPublish = mockClient.publishAsync;
+      mockClient.publishAsync = vi.fn(async (topic: string, payload?: string | Buffer) => {
+        if (topic === `${PREFIX}/connect`) {
+          queueMicrotask(() =>
+            mockClient._simulateMessage(
+              `${PREFIX}/connected`,
+              JSON.stringify({
+                chars: [
+                  { uuid: GATT_NOTIFY_UUID, properties: ['notify'] },
+                  { uuid: GATT_WRITE_UUID, properties: ['write'] },
+                ],
+              }),
+            ),
+          );
+        }
+        // When unlock command is written, simulate a notification
+        if (topic === `${PREFIX}/write/${GATT_WRITE_UUID}`) {
+          queueMicrotask(() => {
+            const buf = Buffer.alloc(4);
+            buf.writeUInt16LE(7550, 0); // 75.50 kg
+            buf.writeUInt16LE(500, 2); // impedance 500
+            mockClient._simulateMessage(`${PREFIX}/notify/${GATT_NOTIFY_UUID}`, buf);
+          });
+        }
+        return origPublish(topic, payload);
+      });
+
+      const result = await scanAndReadRaw({
+        adapters: [adapter],
+        profile: PROFILE,
+        mqttProxy: MQTT_PROXY_CONFIG,
+      });
+
+      expect(result.reading.weight).toBe(75.5);
+      expect(result.reading.impedance).toBe(500);
+      expect(result.adapter.name).toBe('GattScale');
+
+      // Should have published connect command
+      const connectCalls = (mockClient.publishAsync as ReturnType<typeof vi.fn>).mock.calls.filter(
+        (c: unknown[]) => c[0] === `${PREFIX}/connect`,
       );
+      expect(connectCalls).toHaveLength(1);
+      expect(JSON.parse(connectCalls[0][1] as string)).toEqual({
+        address: 'AA:BB:CC:DD:EE:FF',
+        addr_type: 0,
+      });
 
-      wireBroadcastFlow([
-        {
-          address: 'AA:BB:CC:DD:EE:FF',
-          name: 'MyScale',
-          rssi: -50,
-          services: [],
-          // No manufacturer_id/data — broadcast data missing
-        },
-      ]);
-
-      await expect(
-        scanAndReadRaw({
-          adapters: [adapter],
-          profile: PROFILE,
-          mqttProxy: MQTT_PROXY_CONFIG,
-        }),
-      ).rejects.toThrow('no broadcast data available');
+      // Should have published disconnect
+      const disconnectCalls = (
+        mockClient.publishAsync as ReturnType<typeof vi.fn>
+      ).mock.calls.filter((c: unknown[]) => c[0] === `${PREFIX}/disconnect`);
+      expect(disconnectCalls).toHaveLength(1);
     });
 
     it('filters scan results by targetMac', async () => {
@@ -498,9 +585,15 @@ describe('handler-mqtt-proxy', () => {
     });
 
     it('deduplicates MACs (case-insensitive)', async () => {
+      // Register once
+      await registerScaleMac(MQTT_PROXY_CONFIG, 'FF:EE:DD:CC:BB:AA');
+      expect(mockClient.publishAsync).toHaveBeenCalledTimes(1);
+
+      // Reset mock call count, then register same MAC in different case
+      (mockClient.publishAsync as ReturnType<typeof vi.fn>).mockClear();
       await registerScaleMac(MQTT_PROXY_CONFIG, 'ff:ee:dd:cc:bb:aa');
 
-      // Should not publish again — same MAC was registered in previous test
+      // Should not publish again — same MAC already known
       expect(mockClient.publishAsync).not.toHaveBeenCalled();
     });
   });
@@ -891,6 +984,213 @@ describe('handler-mqtt-proxy', () => {
 
       const raw = await watcher.nextReading();
       expect(raw.reading.weight).toBe(75.5);
+    });
+  });
+
+  describe('GATT proxy', () => {
+    /** Wire GATT flow: online → scan (GATT device) → connected → notification.
+     *  Connected response is triggered by publishAsync(connect), not subscribeAsync,
+     *  because mqttGattConnect sets up the handler AFTER subscribing but BEFORE publishing. */
+    function wireGattFlow(opts?: { skipNotify?: boolean; addrType?: number }) {
+      mockClient.subscribeAsync = vi.fn(async (topic: string) => {
+        if (topic === `${PREFIX}/status`) {
+          queueMicrotask(() => mockClient._simulateMessage(`${PREFIX}/status`, 'online'));
+        }
+        if (topic === `${PREFIX}/scan/results`) {
+          queueMicrotask(() =>
+            mockClient._simulateMessage(
+              `${PREFIX}/scan/results`,
+              JSON.stringify([
+                {
+                  address: 'AA:BB:CC:DD:EE:FF',
+                  name: 'GattScale',
+                  rssi: -50,
+                  services: [],
+                  addr_type: opts?.addrType ?? 1,
+                },
+              ]),
+            ),
+          );
+        }
+        return [];
+      });
+
+      const origPublish = mockClient.publishAsync;
+      mockClient.publishAsync = vi.fn(async (topic: string, payload?: string | Buffer) => {
+        if (topic === `${PREFIX}/connect`) {
+          queueMicrotask(() =>
+            mockClient._simulateMessage(
+              `${PREFIX}/connected`,
+              JSON.stringify({
+                chars: [
+                  { uuid: GATT_NOTIFY_UUID, properties: ['notify'] },
+                  { uuid: GATT_WRITE_UUID, properties: ['write'] },
+                ],
+              }),
+            ),
+          );
+        }
+        if (topic === `${PREFIX}/write/${GATT_WRITE_UUID}` && !opts?.skipNotify) {
+          queueMicrotask(() => {
+            const buf = Buffer.alloc(4);
+            buf.writeUInt16LE(7550, 0);
+            buf.writeUInt16LE(500, 2);
+            mockClient._simulateMessage(`${PREFIX}/notify/${GATT_NOTIFY_UUID}`, buf);
+          });
+        }
+        return origPublish(topic, payload);
+      });
+    }
+
+    it('sends addr_type from scan result in connect payload', async () => {
+      const adapter = createGattAdapter();
+      wireGattFlow();
+
+      await scanAndReadRaw({
+        adapters: [adapter],
+        profile: PROFILE,
+        mqttProxy: MQTT_PROXY_CONFIG,
+      });
+
+      const connectCalls = (mockClient.publishAsync as ReturnType<typeof vi.fn>).mock.calls.filter(
+        (c: unknown[]) => c[0] === `${PREFIX}/connect`,
+      );
+      expect(JSON.parse(connectCalls[0][1] as string).addr_type).toBe(1);
+    });
+
+    it('always disconnects after GATT reading (even on error)', async () => {
+      const adapter = createGattAdapter();
+
+      mockClient.subscribeAsync = vi.fn(async (topic: string) => {
+        if (topic === `${PREFIX}/status`) {
+          queueMicrotask(() => mockClient._simulateMessage(`${PREFIX}/status`, 'online'));
+        }
+        if (topic === `${PREFIX}/scan/results`) {
+          queueMicrotask(() =>
+            mockClient._simulateMessage(
+              `${PREFIX}/scan/results`,
+              JSON.stringify([
+                { address: 'AA:BB:CC:DD:EE:FF', name: 'GattScale', rssi: -50, services: [] },
+              ]),
+            ),
+          );
+        }
+        return [];
+      });
+
+      const origPublish = mockClient.publishAsync;
+      mockClient.publishAsync = vi.fn(async (topic: string, payload?: string | Buffer) => {
+        if (topic === `${PREFIX}/connect`) {
+          queueMicrotask(() =>
+            mockClient._simulateMessage(
+              `${PREFIX}/connected`,
+              JSON.stringify({ chars: [{ uuid: GATT_NOTIFY_UUID, properties: ['notify'] }] }),
+            ),
+          );
+          // After connect, simulate unexpected BLE disconnected event → error path
+          setTimeout(() => mockClient._simulateMessage(`${PREFIX}/disconnected`, ''), 50);
+        }
+        return origPublish(topic, payload);
+      });
+
+      await expect(
+        scanAndReadRaw({
+          adapters: [adapter],
+          profile: PROFILE,
+          mqttProxy: MQTT_PROXY_CONFIG,
+        }),
+      ).rejects.toThrow();
+
+      // Should still have sent disconnect
+      const disconnectCalls = (
+        mockClient.publishAsync as ReturnType<typeof vi.fn>
+      ).mock.calls.filter((c: unknown[]) => c[0] === `${PREFIX}/disconnect`);
+      expect(disconnectCalls).toHaveLength(1);
+    });
+
+    it('ReadingWatcher handles GATT scale via handleGattReading', async () => {
+      const adapter = createGattAdapter();
+      const watcher = new ReadingWatcher(MQTT_PROXY_CONFIG, [adapter], undefined, PROFILE);
+      await watcher.start();
+
+      // The watcher's message handler calls handleGattReading which uses
+      // publishAsync to send the connect command. Wire up publish-based responses.
+      const origPublish = mockClient.publishAsync;
+      mockClient.publishAsync = vi.fn(async (topic: string, payload?: string | Buffer) => {
+        if (topic === `${PREFIX}/connect`) {
+          queueMicrotask(() =>
+            mockClient._simulateMessage(
+              `${PREFIX}/connected`,
+              JSON.stringify({
+                chars: [
+                  { uuid: GATT_NOTIFY_UUID, properties: ['notify'] },
+                  { uuid: GATT_WRITE_UUID, properties: ['write'] },
+                ],
+              }),
+            ),
+          );
+        }
+        if (topic === `${PREFIX}/write/${GATT_WRITE_UUID}`) {
+          queueMicrotask(() => {
+            const buf = Buffer.alloc(4);
+            buf.writeUInt16LE(8000, 0); // 80.00 kg
+            buf.writeUInt16LE(450, 2); // impedance 450
+            mockClient._simulateMessage(`${PREFIX}/notify/${GATT_NOTIFY_UUID}`, buf);
+          });
+        }
+        return origPublish(topic, payload);
+      });
+
+      // Simulate scan result with no broadcast data → triggers GATT fallback
+      mockClient._simulateMessage(
+        `${PREFIX}/scan/results`,
+        JSON.stringify([
+          {
+            address: 'AA:BB:CC:DD:EE:FF',
+            name: 'GattScale',
+            rssi: -50,
+            services: [],
+            addr_type: 0,
+          },
+        ]),
+      );
+
+      const raw = await watcher.nextReading();
+      expect(raw.reading.weight).toBe(80.0);
+      expect(raw.reading.impedance).toBe(450);
+      expect(raw.adapter.name).toBe('GattScale');
+    });
+
+    it('broadcast scales still work unchanged (no regression)', async () => {
+      const broadcastAdapter = createBroadcastAdapter();
+      const gattAdapter = createGattAdapter();
+
+      wireBroadcastFlow([
+        {
+          address: 'AA:BB:CC:DD:EE:FF',
+          name: '',
+          rssi: -50,
+          services: [],
+          manufacturer_id: 0xffff,
+          manufacturer_data: mfrHex(7550),
+        },
+      ]);
+
+      const result = await scanAndReadRaw({
+        adapters: [broadcastAdapter, gattAdapter],
+        profile: PROFILE,
+        mqttProxy: MQTT_PROXY_CONFIG,
+      });
+
+      // Should use broadcast path, not GATT
+      expect(result.reading.weight).toBe(75.5);
+      expect(result.adapter.name).toBe('BroadcastScale');
+
+      // No connect command should have been published
+      const connectCalls = (mockClient.publishAsync as ReturnType<typeof vi.fn>).mock.calls.filter(
+        (c: unknown[]) => c[0] === `${PREFIX}/connect`,
+      );
+      expect(connectCalls).toHaveLength(0);
     });
   });
 });

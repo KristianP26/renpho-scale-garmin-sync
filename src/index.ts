@@ -411,7 +411,8 @@ async function main(): Promise<void> {
 
   if (bleHandler === 'mqtt-proxy' && mqttProxy) {
     // Event-driven: persistent MQTT connection with always-on message handler
-    const watcher = new ReadingWatcher(mqttProxy, adapters, SCALE_MAC);
+    const defaultProfile = resolveUserProfile(appConfig.users[0], appConfig.scale);
+    const watcher = new ReadingWatcher(mqttProxy, adapters, SCALE_MAC, defaultProfile);
 
     while (!signal.aborted) {
       try {
