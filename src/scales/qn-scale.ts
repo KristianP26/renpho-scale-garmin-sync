@@ -183,12 +183,12 @@ export class QnScaleAdapter implements ScaleAdapter {
    *   [0-1]   Company ID (FF FF)
    *   [2-3]   AA BB — QN protocol marker
    *   [4-9]   MAC address (6 bytes)
-   *   [10-11] weight (BE uint16 / 100 = kg)
-   *   [12-13] reserved
-   *   [14-16] impedance placeholder (FF FF FF = not available)
-   *   [17]    unit/mode
-   *   [18-24] reserved / hardware info
-   *   [25]    stability (0x01 = stable, 0x00 = measuring)
+   *   [10-11] counter/sequence (increments each packet)
+   *   [12-14] unknown/flags
+   *   [15]    stability (0x25 = stable, other = settling)
+   *   [16]    unknown
+   *   [17-18] weight (LE uint16 / 100 = kg)
+   *   [19-25] hardware info / unknown
    *
    * Returns a ScaleReading only when the reading is stable and weight is in
    * a valid range. Impedance is always 0 (not available in broadcast mode).
@@ -197,10 +197,10 @@ export class QnScaleAdapter implements ScaleAdapter {
     if (data.length < QN_BROADCAST_MIN_LEN) return null;
     if (data[2] !== QN_MARKER_0 || data[3] !== QN_MARKER_1) return null;
 
-    const stable = data[25] === 0x01;
+    const stable = data[15] === 0x25;
     if (!stable) return null;
 
-    const rawWeight = data.readUInt16BE(10);
+    const rawWeight = data.readUInt16LE(17);
     const weight = rawWeight / 100;
 
     if (weight < 5 || weight > 300 || !Number.isFinite(weight)) return null;

@@ -114,9 +114,9 @@ async function main(): Promise<void> {
 
       // Parse QN broadcast weight from AABB manufacturer data
       if (mfgData.length >= 26 && mfgData[2] === 0xaa && mfgData[3] === 0xbb) {
-        const rawWeight = mfgData.readUInt16BE(10);
+        const rawWeight = mfgData.readUInt16LE(17);
         const weight = rawWeight / 100;
-        const stable = mfgData[25] === 0x01;
+        const stable = mfgData[15] === 0x25;
         log.info(
           `    QN broadcast: ${weight.toFixed(2)} kg ${stable ? '(stable)' : '(measuring)'}`,
         );

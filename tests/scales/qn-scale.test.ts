@@ -245,8 +245,8 @@ describe('QnScaleAdapter', () => {
       buf[1] = 0xff;
       buf[2] = 0xaa; // QN marker
       buf[3] = 0xbb;
-      buf.writeUInt16BE(weightRaw, 10);
-      buf[25] = stable ? 0x01 : 0x00;
+      buf[15] = stable ? 0x25 : 0x04;
+      buf.writeUInt16LE(weightRaw, 17);
       return buf;
     }
 
