@@ -300,10 +300,8 @@ class MqttBleChar implements BleChar {
       }
     };
     let resolveOuter!: (buf: Buffer) => void;
-    let rejectOuter!: (err: Error) => void;
-    const promise = new Promise<Buffer>((resolve, reject) => {
+    const promise = new Promise<Buffer>((resolve) => {
       resolveOuter = resolve;
-      rejectOuter = reject;
     });
     this.client.on('message', handler);
     try {

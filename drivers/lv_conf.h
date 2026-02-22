@@ -1,3 +1,9 @@
+/*
+ * Project-specific LVGL configuration for ble-scale-sync display boards.
+ * Based on lv_conf_template.h from LVGL v9.3.0 with project customisations
+ * (enabled fonts, colour depth, memory settings). Copied into the build tree
+ * by drivers/build.sh.
+ */
 /**
  * @file lv_conf.h
  * Configuration file for v9.3.0

@@ -12,6 +12,8 @@ import sys
 import struct
 import time
 
+# ── Configuration ───────────────────────────────────────
+# Change these to match your setup.
 BROKER = "10.1.1.15"
 BASE = "ble-proxy/esp32-ble-proxy"
 OUTPUT = sys.argv[1] if len(sys.argv) > 1 else "/tmp/screenshot.png"
