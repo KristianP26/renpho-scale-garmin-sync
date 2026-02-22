@@ -10,6 +10,7 @@ import {
   sleep,
   errMsg,
   withTimeout,
+  resetAdapterBtmgmt,
   CONNECT_TIMEOUT_MS,
   MAX_CONNECT_RETRIES,
   DISCOVERY_TIMEOUT_MS,
@@ -111,6 +112,18 @@ async function startDiscoverySafe(btAdapter: Adapter): Promise<boolean> {
     return true;
   } catch (e) {
     bleLog.debug(`Power cycle / startDiscovery failed: ${errMsg(e)}`);
+  }
+
+  // 4. Kernel-level adapter reset via btmgmt (bypasses D-Bus session ownership)
+  bleLog.debug('Attempting kernel-level adapter reset via btmgmt...');
+  if (await resetAdapterBtmgmt()) {
+    try {
+      await btAdapter.startDiscovery();
+      bleLog.debug('Discovery started after btmgmt reset');
+      return true;
+    } catch (e) {
+      bleLog.debug(`startDiscovery after btmgmt reset failed: ${errMsg(e)}`);
+    }
   }
 
   // All strategies failed — warn but don't throw

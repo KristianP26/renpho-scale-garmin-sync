@@ -10,6 +10,7 @@ import {
   sleep,
   errMsg,
   withTimeout,
+  resetAdapterBtmgmt,
   CONNECT_TIMEOUT_MS,
   MAX_CONNECT_RETRIES,
   DISCOVERY_TIMEOUT_MS,
@@ -20,23 +21,36 @@ import {
 // ─── Noble state management ───────────────────────────────────────────────────
 
 /** Wait for the Bluetooth adapter to reach 'poweredOn' state. */
-function waitForPoweredOn(): Promise<void> {
-  if (noble._state === 'poweredOn') return Promise.resolve();
-  return new Promise<void>((resolve, reject) => {
-    const timeout = setTimeout(() => {
-      noble.removeListener('stateChange', onState);
-      reject(new Error(`Bluetooth adapter state: '${noble._state}' (expected 'poweredOn')`));
-    }, 10_000);
+async function waitForPoweredOn(): Promise<void> {
+  if (noble._state === 'poweredOn') return;
 
-    const onState = (state: string): void => {
-      if (state === 'poweredOn') {
-        clearTimeout(timeout);
+  const waitOnce = (): Promise<boolean> =>
+    new Promise<boolean>((resolve) => {
+      const timeout = setTimeout(() => {
         noble.removeListener('stateChange', onState);
-        resolve();
-      }
-    };
-    noble.on('stateChange', onState);
-  });
+        resolve(false);
+      }, 10_000);
+      const onState = (state: string): void => {
+        if (state === 'poweredOn') {
+          clearTimeout(timeout);
+          noble.removeListener('stateChange', onState);
+          resolve(true);
+        }
+      };
+      noble.on('stateChange', onState);
+    });
+
+  if (await waitOnce()) return;
+
+  // Adapter not poweredOn — attempt btmgmt kernel-level reset
+  const state = (): string => noble._state;
+  bleLog.debug(`Adapter state '${state()}', attempting btmgmt reset...`);
+  if (await resetAdapterBtmgmt()) {
+    if (state() === 'poweredOn') return;
+    if (await waitOnce()) return;
+  }
+
+  throw new Error(`Bluetooth adapter state: '${state()}' (expected 'poweredOn')`);
 }
 
 /** Get a stable device address: MAC on Windows/Linux, peripheral.id on macOS. */

@@ -1,7 +1,8 @@
 import type { ScaleAdapter, UserProfile, ScaleReading } from '../interfaces/scale-adapter.js';
 import type { WeightUnit } from '../config/schema.js';
 import { createLogger } from '../logger.js';
-export { errMsg } from '../utils/error.js';
+import { errMsg } from '../utils/error.js';
+export { errMsg };
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -84,5 +85,25 @@ export async function withTimeout<T>(promise: Promise<T>, ms: number, message: s
     return await Promise.race([promise, timeout]);
   } finally {
     clearTimeout(timer!);
+  }
+}
+
+export async function resetAdapterBtmgmt(adapterIndex = 0): Promise<boolean> {
+  if (process.platform !== 'linux') return false;
+  try {
+    const { execFile } = await import('node:child_process');
+    const { promisify } = await import('node:util');
+    const run = promisify(execFile);
+    const idx = String(adapterIndex);
+    await run('btmgmt', ['--index', idx, 'power', 'off'], { timeout: 5000 });
+    bleLog.debug('btmgmt: adapter powered off');
+    await sleep(500);
+    await run('btmgmt', ['--index', idx, 'power', 'on'], { timeout: 5000 });
+    bleLog.debug('btmgmt: adapter powered on');
+    await sleep(1500);
+    return true;
+  } catch (err) {
+    bleLog.debug(`btmgmt reset failed: ${errMsg(err)}`);
+    return false;
   }
 }

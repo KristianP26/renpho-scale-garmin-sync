@@ -3,14 +3,26 @@ set -e
 
 CMD="${1:-start}"
 
+reset_bt_adapter() {
+  if command -v btmgmt >/dev/null 2>&1; then
+    echo "Resetting Bluetooth adapter..."
+    btmgmt power off 2>/dev/null && btmgmt power on 2>/dev/null \
+      && echo "Bluetooth adapter reset OK" \
+      || echo "Bluetooth adapter reset failed (will retry in-app)"
+    sleep 2
+  fi
+}
+
 case "$CMD" in
   start)
+    reset_bt_adapter
     exec npx tsx src/index.ts
     ;;
   setup)
     exec npx tsx src/wizard/index.ts
     ;;
   scan)
+    reset_bt_adapter
     exec npx tsx src/scan.ts
     ;;
   validate)
