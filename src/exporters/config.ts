@@ -2,7 +2,7 @@ import { createLogger } from '../logger.js';
 
 const log = createLogger('ExporterConfig');
 
-export type ExporterName = 'garmin' | 'mqtt' | 'webhook' | 'influxdb' | 'ntfy' | 'file';
+export type ExporterName = 'garmin' | 'mqtt' | 'webhook' | 'influxdb' | 'ntfy' | 'file' | 'strava';
 
 const KNOWN_EXPORTERS = new Set<ExporterName>([
   'garmin',
@@ -11,6 +11,7 @@ const KNOWN_EXPORTERS = new Set<ExporterName>([
   'influxdb',
   'ntfy',
   'file',
+  'strava',
 ]);
 
 export interface MqttConfig {
@@ -55,6 +56,12 @@ export interface FileConfig {
   format: 'csv' | 'jsonl';
 }
 
+export interface StravaConfig {
+  clientId: string;
+  clientSecret: string;
+  tokenDir: string;
+}
+
 export interface ExporterConfig {
   exporters: ExporterName[];
   mqtt?: MqttConfig;
@@ -62,6 +69,7 @@ export interface ExporterConfig {
   influxdb?: InfluxDbConfig;
   ntfy?: NtfyConfig;
   file?: FileConfig;
+  strava?: StravaConfig;
 }
 
 function fail(msg: string): never {
@@ -213,5 +221,22 @@ export function loadExporterConfig(): ExporterConfig {
     file = { filePath, format };
   }
 
-  return { exporters, mqtt, webhook, influxdb, ntfy, file };
+  let strava: StravaConfig | undefined;
+  if (exporters.includes('strava')) {
+    const clientId = process.env.STRAVA_CLIENT_ID?.trim();
+    if (!clientId) {
+      fail('STRAVA_CLIENT_ID is required when strava exporter is enabled.');
+    }
+    const clientSecret = process.env.STRAVA_CLIENT_SECRET?.trim();
+    if (!clientSecret) {
+      fail('STRAVA_CLIENT_SECRET is required when strava exporter is enabled.');
+    }
+    strava = {
+      clientId,
+      clientSecret,
+      tokenDir: process.env.STRAVA_TOKEN_DIR?.trim() || './strava-tokens',
+    };
+  }
+
+  return { exporters, mqtt, webhook, influxdb, ntfy, file, strava };
 }
