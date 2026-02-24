@@ -7,15 +7,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [1.5.0] - 2026-02-24
 
 ### Added
-- **File exporter** (CSV/JSONL) for local measurement logging without external services. Auto-header CSV, JSONL format, per-user file paths, directory writability healthcheck, and proper CSV escaping for special characters
-- **Strava exporter** with OAuth2 token management. Updates athlete weight via PUT /api/v3/athlete. Automatic token refresh, persistent storage with restricted file permissions (0o600), and interactive setup script (`npm run setup-strava`)
+- **File exporter** (CSV/JSONL) for local measurement logging without external services. Auto-header CSV with proper escaping, JSONL format, per-user file paths, and directory writability healthcheck
+- **Strava exporter** with OAuth2 token management. Updates athlete weight via PUT /api/v3/athlete. Automatic token refresh, restricted file permissions (0o600), and interactive setup script (`npm run setup-strava`)
 - Strava API application setup guide in documentation with step-by-step instructions
-
-### Fixed
-- Single-user mode now passes ExportContext to exporters (user name was missing in File CSV output)
-- Strava token files use restricted permissions (0o600) to prevent unauthorized access
-- Malformed Strava token files now show a clear error message instead of a generic JSON parse error
-- Invalid `FILE_FORMAT` env var values now log a warning instead of silently defaulting to CSV
 
 ## [1.4.0] - 2026-02-24
 
