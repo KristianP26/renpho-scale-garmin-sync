@@ -179,6 +179,7 @@ function buildAllUniqueExporters(): Exporter[] {
 
 async function runSingleUserCycle(exporters?: Exporter[]): Promise<boolean> {
   const { profile } = resolveForSingleUser(appConfig);
+  const user = appConfig.users[0];
 
   const payload: BodyComposition = await scanAndRead({
     targetMac: SCALE_MAC,
@@ -204,7 +205,13 @@ async function runSingleUserCycle(exporters?: Exporter[]): Promise<boolean> {
     return true;
   }
 
-  return dispatchExports(exporters, payload);
+  const context: ExportContext = {
+    userName: user.name,
+    userSlug: user.slug,
+    userConfig: user,
+  };
+
+  return dispatchExports(exporters, payload, context);
 }
 
 // ─── Multi-user cycle ───────────────────────────────────────────────────────
