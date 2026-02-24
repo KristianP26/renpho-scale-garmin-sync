@@ -186,6 +186,16 @@ global_exporters:
 
 CSV files get an automatic header row on first write. JSONL files append one JSON object per line.
 
+::: tip Docker
+Mount a volume so the file persists across container restarts:
+
+```yaml
+volumes:
+  - scale-data:/app/data
+# config.yaml: file_path: './data/measurements.csv'
+```
+:::
+
 ## Strava {#strava}
 
 Update your weight in the Strava athlete profile. Requires a Strava API application (create one at [strava.com/settings/api](https://www.strava.com/settings/api)).
