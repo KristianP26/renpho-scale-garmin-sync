@@ -104,6 +104,24 @@ describe('FileExporter', () => {
       expect(row).toContain('kristian');
     });
 
+    it('escapes user name containing commas in CSV', async () => {
+      const exporter = new FileExporter(csvConfig);
+      await exporter.export(samplePayload, { userName: 'Doe, Jane' });
+
+      const dataCall = vi.mocked(fs.appendFileSync).mock.calls[1];
+      const row = dataCall[1] as string;
+      expect(row).toContain('"Doe, Jane"');
+    });
+
+    it('escapes user name containing double quotes in CSV', async () => {
+      const exporter = new FileExporter(csvConfig);
+      await exporter.export(samplePayload, { userName: 'The "Boss"' });
+
+      const dataCall = vi.mocked(fs.appendFileSync).mock.calls[1];
+      const row = dataCall[1] as string;
+      expect(row).toContain('"The ""Boss"""');
+    });
+
     it('leaves user column empty when no context', async () => {
       const exporter = new FileExporter(csvConfig);
       await exporter.export(samplePayload);

@@ -9,6 +9,13 @@ import { errMsg } from '../utils/error.js';
 
 const log = createLogger('File');
 
+function csvEscape(value: string): string {
+  if (value.includes(',') || value.includes('"') || value.includes('\n')) {
+    return `"${value.replace(/"/g, '""')}"`;
+  }
+  return value;
+}
+
 const CSV_COLUMNS = [
   'timestamp',
   'weight',
@@ -116,7 +123,7 @@ export class FileExporter implements Exporter {
       data.physiqueRating,
       data.bmr,
       data.metabolicAge,
-      user,
+      csvEscape(user),
     ].join(',');
 
     fs.appendFileSync(filePath, row + '\n');

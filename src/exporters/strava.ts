@@ -89,7 +89,13 @@ export class StravaExporter implements Exporter {
       );
     }
     const raw = fs.readFileSync(tokenPath, 'utf-8');
-    return JSON.parse(raw) as StravaTokens;
+    try {
+      return JSON.parse(raw) as StravaTokens;
+    } catch {
+      throw new Error(
+        `Malformed token file at ${tokenPath}. Delete it and run "npm run setup-strava" again.`,
+      );
+    }
   }
 
   private async ensureFreshToken(tokens: StravaTokens): Promise<string> {
@@ -138,7 +144,7 @@ export class StravaExporter implements Exporter {
     if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true });
     }
-    fs.writeFileSync(tokenPath, JSON.stringify(tokens, null, 2) + '\n');
+    fs.writeFileSync(tokenPath, JSON.stringify(tokens, null, 2) + '\n', { mode: 0o600 });
   }
 
   private tokenFilePath(): string {

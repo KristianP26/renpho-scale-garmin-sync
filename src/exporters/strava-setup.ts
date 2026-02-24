@@ -117,7 +117,7 @@ async function main(): Promise<void> {
     if (!fs.existsSync(tokenDir)) {
       fs.mkdirSync(tokenDir, { recursive: true });
     }
-    fs.writeFileSync(tokenPath, JSON.stringify(tokens, null, 2) + '\n');
+    fs.writeFileSync(tokenPath, JSON.stringify(tokens, null, 2) + '\n', { mode: 0o600 });
 
     log.info(`Tokens saved to ${tokenPath}`);
     console.log('\nStrava setup complete! You can now use the Strava exporter.\n');

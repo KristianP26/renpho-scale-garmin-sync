@@ -135,6 +135,7 @@ describe('StravaExporter', () => {
     expect(fs.writeFileSync).toHaveBeenCalledWith(
       expect.stringContaining('strava_tokens.json'),
       expect.stringContaining('"new_access"'),
+      { mode: 0o600 },
     );
   });
 
@@ -146,6 +147,43 @@ describe('StravaExporter', () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toContain('setup-strava');
+  });
+
+  it('fails with helpful message on malformed token file', async () => {
+    vi.mocked(fs.readFileSync).mockReturnValue('not valid json {{{');
+
+    const exporter = new StravaExporter(defaultConfig);
+    const result = await exporter.export(samplePayload);
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('Malformed token file');
+    expect(result.error).toContain('setup-strava');
+  });
+
+  it('saves tokens with restricted file permissions', async () => {
+    vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify(expiredTokens));
+
+    mockFetch
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: () =>
+          Promise.resolve({
+            access_token: 'new_access',
+            refresh_token: 'new_refresh',
+            expires_at: 9999999999,
+          }),
+      })
+      .mockResolvedValueOnce({ ok: true, status: 200 });
+
+    const exporter = new StravaExporter(defaultConfig);
+    await exporter.export(samplePayload);
+
+    expect(fs.writeFileSync).toHaveBeenCalledWith(
+      expect.stringContaining('strava_tokens.json'),
+      expect.any(String),
+      { mode: 0o600 },
+    );
   });
 
   it('returns failure on non-2xx upload response', async () => {
