@@ -5,6 +5,7 @@ import { MqttExporter } from './mqtt.js';
 import { WebhookExporter } from './webhook.js';
 import { InfluxDbExporter } from './influxdb.js';
 import { NtfyExporter } from './ntfy.js';
+import { FileExporter } from './file.js';
 
 export { loadExporterConfig } from './config.js';
 export { createExporterFromEntry, EXPORTER_SCHEMAS, KNOWN_EXPORTER_NAMES } from './registry.js';
@@ -28,6 +29,9 @@ export function createExporters(config: ExporterConfig): Exporter[] {
         break;
       case 'ntfy':
         exporters.push(new NtfyExporter(config.ntfy!));
+        break;
+      case 'file':
+        exporters.push(new FileExporter(config.file!));
         break;
       default: {
         const _exhaustive: never = name;

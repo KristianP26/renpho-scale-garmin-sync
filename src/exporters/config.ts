@@ -2,9 +2,16 @@ import { createLogger } from '../logger.js';
 
 const log = createLogger('ExporterConfig');
 
-export type ExporterName = 'garmin' | 'mqtt' | 'webhook' | 'influxdb' | 'ntfy';
+export type ExporterName = 'garmin' | 'mqtt' | 'webhook' | 'influxdb' | 'ntfy' | 'file';
 
-const KNOWN_EXPORTERS = new Set<ExporterName>(['garmin', 'mqtt', 'webhook', 'influxdb', 'ntfy']);
+const KNOWN_EXPORTERS = new Set<ExporterName>([
+  'garmin',
+  'mqtt',
+  'webhook',
+  'influxdb',
+  'ntfy',
+  'file',
+]);
 
 export interface MqttConfig {
   brokerUrl: string;
@@ -43,12 +50,18 @@ export interface NtfyConfig {
   password?: string;
 }
 
+export interface FileConfig {
+  filePath: string;
+  format: 'csv' | 'jsonl';
+}
+
 export interface ExporterConfig {
   exporters: ExporterName[];
   mqtt?: MqttConfig;
   webhook?: WebhookConfig;
   influxdb?: InfluxDbConfig;
   ntfy?: NtfyConfig;
+  file?: FileConfig;
 }
 
 function fail(msg: string): never {
@@ -188,5 +201,17 @@ export function loadExporterConfig(): ExporterConfig {
     };
   }
 
-  return { exporters, mqtt, webhook, influxdb, ntfy };
+  let file: FileConfig | undefined;
+  if (exporters.includes('file')) {
+    const filePath = process.env.FILE_PATH?.trim();
+    if (!filePath) {
+      fail('FILE_PATH is required when file exporter is enabled.');
+    }
+    const rawFormat = process.env.FILE_FORMAT?.trim()?.toLowerCase();
+    const format: 'csv' | 'jsonl' =
+      rawFormat === 'jsonl' ? 'jsonl' : rawFormat === 'csv' || !rawFormat ? 'csv' : 'csv';
+    file = { filePath, format };
+  }
+
+  return { exporters, mqtt, webhook, influxdb, ntfy, file };
 }
