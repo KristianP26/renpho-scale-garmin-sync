@@ -50,11 +50,12 @@ Requires Node.js v20+ and a BLE adapter. See the **[full install guide](https://
 ## Features
 
 - **[23 scale brands](https://blescalesync.dev/guide/supported-scales)** — Xiaomi, Renpho, Eufy, Yunmai, Beurer, Sanitas, Medisana, and more
-- **[5 export targets](https://blescalesync.dev/exporters)** — Garmin Connect (multi-user Docker auth), MQTT (Home Assistant), InfluxDB, Webhook, Ntfy
+- **[5 export targets](https://blescalesync.dev/exporters)** — Garmin Connect (multi-user Docker auth, 2FA), MQTT (Home Assistant), InfluxDB, Webhook, Ntfy
 - **[10 body metrics](https://blescalesync.dev/body-composition)** — BIA-based body composition from weight + impedance
 - **[Multi-user](https://blescalesync.dev/multi-user)** — automatic weight-based identification with per-user exporters
 - **[Interactive setup wizard](https://blescalesync.dev/guide/configuration)** — scale discovery, exporter config, connectivity tests
 - **[BLE diagnostic tool](https://blescalesync.dev/troubleshooting)** — `npm run diagnose` for detailed BLE troubleshooting
+- **Broadcast mode** — supports non-connectable scales that only advertise weight via BLE advertisements
 - **Cross-platform** — Linux (Docker + native), macOS, Windows
 - **Private** — your data stays on your device, no vendor cloud
 

@@ -7,7 +7,26 @@ description: Version history for BLE Scale Sync.
 
 All notable changes to this project are documented here. Format based on [Keep a Changelog](https://keepachangelog.com/).
 
-## v1.3.1 <Badge type="tip" text="latest" /> {#v1-3-1}
+## v1.4.0 <Badge type="tip" text="latest" /> {#v1-4-0}
+
+_2026-02-24_
+
+### Added
+- **BLE diagnostic tool** (`npm run diagnose`) for detailed device analysis: advertisement data, service UUIDs, RSSI, connectable flag, and step-by-step GATT connection testing
+- **Broadcast mode** for non-connectable QN-protocol scales (#34). Reads weight directly from BLE advertisement data without requiring a GATT connection
+- **Garmin 2FA/MFA support** in `setup_garmin.py` ([#41](https://github.com/KristianP26/ble-scale-sync/pull/41) by [@APIUM](https://github.com/APIUM))
+
+### Fixed
+- **QN broadcast parser**: corrected byte layout (LE uint16 at bytes 17-18, stability flag at byte 15)
+- **ES-CS20M**: service UUID 0x1A10 fallback for unnamed Yunmai-protocol devices (#34)
+- **ES-CS20M**: 0x11 STOP frame support as stability signal (#34)
+
+### Changed
+- **CI**: Node.js 24 added to test matrix (required check)
+- **CI**: PR-triggered Docker image builds with `pr-{id}` tags (#44)
+- **Deps**: ESLint v10, typescript-eslint v8.56
+
+## v1.3.1 {#v1-3-1}
 
 _2026-02-22_
 
