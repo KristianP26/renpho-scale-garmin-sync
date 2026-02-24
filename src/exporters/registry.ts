@@ -1,12 +1,21 @@
 import type { ExporterSchema } from '../interfaces/exporter-schema.js';
 import type { Exporter } from '../interfaces/exporter.js';
 import type { ExporterEntry } from '../config/schema.js';
-import type { MqttConfig, WebhookConfig, InfluxDbConfig, NtfyConfig } from './config.js';
+import type {
+  MqttConfig,
+  WebhookConfig,
+  InfluxDbConfig,
+  NtfyConfig,
+  FileConfig,
+  StravaConfig,
+} from './config.js';
 import { garminSchema, GarminExporter } from './garmin.js';
 import { mqttSchema, MqttExporter } from './mqtt.js';
 import { webhookSchema, WebhookExporter } from './webhook.js';
 import { influxdbSchema, InfluxDbExporter } from './influxdb.js';
 import { ntfySchema, NtfyExporter } from './ntfy.js';
+import { fileSchema, FileExporter } from './file.js';
+import { stravaSchema, StravaExporter } from './strava.js';
 
 // --- Registry entry type ---
 
@@ -82,6 +91,27 @@ export const EXPORTER_REGISTRY: ExporterRegistryEntry[] = [
         password: config.password as string | undefined,
       };
       return new NtfyExporter(ntfyConfig);
+    },
+  },
+  {
+    schema: fileSchema,
+    factory: (config) => {
+      const fileConfig: FileConfig = {
+        filePath: config.file_path as string,
+        format: (config.format as 'csv' | 'jsonl') ?? 'csv',
+      };
+      return new FileExporter(fileConfig);
+    },
+  },
+  {
+    schema: stravaSchema,
+    factory: (config) => {
+      const stravaConfig: StravaConfig = {
+        clientId: config.client_id as string,
+        clientSecret: config.client_secret as string,
+        tokenDir: (config.token_dir as string) ?? './strava-tokens',
+      };
+      return new StravaExporter(stravaConfig);
     },
   },
 ];

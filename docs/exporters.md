@@ -1,11 +1,11 @@
 ---
 title: Exporters
-description: Configure Garmin Connect, MQTT, Webhook, InfluxDB, and Ntfy export targets.
+description: Configure Garmin Connect, Strava, MQTT, Webhook, InfluxDB, Ntfy, and File export targets.
 ---
 
 # Exporters
 
-BLE Scale Sync exports body composition data to 5 targets. The [setup wizard](/guide/configuration#setup-wizard-recommended) walks you through exporter selection, configuration, and connectivity testing.
+BLE Scale Sync exports body composition data to 7 targets. The [setup wizard](/guide/configuration#setup-wizard-recommended) walks you through exporter selection, configuration, and connectivity testing.
 
 Exporters are configured in `global_exporters` (shared by all users). For multi-user setups with separate accounts, see [Per-User Exporters](/multi-user#per-user-exporters). All enabled exporters run in parallel — the process reports an error only if **every** exporter fails.
 
@@ -16,6 +16,8 @@ Exporters are configured in `global_exporters` (shared by all users). For multi-
 | [**InfluxDB**](#influxdb) | Time-series database (v2 write API) |
 | [**Webhook**](#webhook) | Any HTTP endpoint — n8n, Make, Zapier, custom APIs |
 | [**Ntfy**](#ntfy) | Push notifications to phone/desktop |
+| [**File (CSV/JSONL)**](#file) | Append readings to a local file |
+| [**Strava**](#strava) | Update weight in your Strava athlete profile |
 
 ## Garmin Connect {#garmin}
 
@@ -166,6 +168,89 @@ global_exporters:
     priority: 4
 ```
 
+## File (CSV/JSONL) {#file}
+
+Append each reading to a local CSV or JSONL file. Useful for simple logging without external services.
+
+| Field | Required | Default | Description |
+|---|---|---|---|
+| `file_path` | Yes | | Path to the output file |
+| `format` | No | `csv` | `csv` or `jsonl` |
+
+```yaml
+global_exporters:
+  - type: file
+    file_path: './measurements.csv'
+    format: csv
+```
+
+CSV files get an automatic header row on first write. JSONL files append one JSON object per line.
+
+::: tip Docker
+Mount a volume so the file persists across container restarts:
+
+```yaml
+volumes:
+  - scale-data:/app/data
+# config.yaml: file_path: './data/measurements.csv'
+```
+:::
+
+## Strava {#strava}
+
+Update your weight in the Strava athlete profile. Requires a Strava API application.
+
+| Field | Required | Default | Description |
+|---|---|---|---|
+| `client_id` | Yes | | Strava API application client ID |
+| `client_secret` | Yes | | Strava API application client secret |
+| `token_dir` | No | `./strava-tokens` | Directory for cached OAuth tokens |
+
+```yaml
+users:
+  - name: Alice
+    exporters:
+      - type: strava
+        client_id: '${STRAVA_CLIENT_ID}'
+        client_secret: '${STRAVA_CLIENT_SECRET}'
+```
+
+### Creating a Strava API Application
+
+1. Go to [strava.com/settings/api](https://www.strava.com/settings/api)
+2. Upload an **Application Icon** (required before you can save the form)
+3. Fill in the application details:
+   - **Application Name**: anything you like (e.g. `BLE Scale Sync`)
+   - **Category**: choose any
+   - **Website**: can be anything (e.g. `https://github.com/KristianP26/ble-scale-sync`)
+   - **Authorization Callback Domain**: set to `localhost` (the OAuth flow redirects here, but the page does not need to load)
+4. Save and copy the **Client ID** and **Client Secret**
+
+::: warning Callback Domain
+The **Authorization Callback Domain** must be set to `localhost`. During the OAuth flow, Strava redirects to `http://localhost?code=XXXX`. The page will not load (nothing is listening), but you only need to copy the `code` parameter from the URL bar.
+:::
+
+::: tip Authentication
+After adding the Strava exporter to your config, run the setup script to authorize:
+
+**Native:**
+
+```bash
+npm run setup-strava
+```
+
+**Docker:**
+
+```bash
+docker run --rm -it \
+  -v ./config.yaml:/app/config.yaml \
+  -v strava-tokens:/app/strava-tokens \
+  ghcr.io/kristianp26/ble-scale-sync:latest setup-strava
+```
+
+The script prints a browser URL for Strava authorization. After authorizing, copy the `code` parameter from the redirect URL and paste it back. Tokens are cached and automatically refreshed.
+:::
+
 ## Secrets
 
 Use `${ENV_VAR}` references in YAML for passwords and tokens. The variable must be defined in the environment or in a `.env` file:
@@ -190,3 +275,5 @@ At startup, exporters are tested for connectivity. Failures are logged as warnin
 | InfluxDB | `/health` endpoint |
 | Ntfy | `/v1/health` endpoint |
 | Garmin | None (Python subprocess) |
+| File | Directory writable check |
+| Strava | None (avoid API rate limits) |
