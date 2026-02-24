@@ -147,7 +147,7 @@ class BleBridge:
         """
         _ble.active(True)
         addr_bytes = bytes(int(b, 16) for b in address.split(":"))
-        aioble_addr_type = aioble.ADDR_RANDOM if addr_type == 1 else aioble.ADDR_PUBLIC
+        aioble_addr_type = aioble.ADDR_RANDOM if (addr_type & 1) else aioble.ADDR_PUBLIC
         device = aioble.Device(aioble_addr_type, addr_bytes)
 
         self._conn = await device.connect(timeout_ms=15000)
