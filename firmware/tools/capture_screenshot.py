@@ -8,14 +8,15 @@ Triggers a screenshot, receives RGB565 data over MQTT, converts to PNG.
 Waits patiently for chunks that arrive between BLE scan WiFi drops.
 """
 
+import os
 import sys
 import struct
 import time
 
 # ── Configuration ───────────────────────────────────────
-# Change these to match your setup.
-BROKER = "10.1.1.15"
-BASE = "ble-proxy/esp32-ble-proxy"
+# Override via environment variables, or edit these defaults.
+BROKER = os.environ.get("BROKER", "10.1.1.15")
+BASE = os.environ.get("BASE", "ble-proxy/esp32-ble-proxy")
 OUTPUT = sys.argv[1] if len(sys.argv) > 1 else "/tmp/screenshot.png"
 
 W, H = 480, 480

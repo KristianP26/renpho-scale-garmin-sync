@@ -114,7 +114,7 @@ Some boards need a slower baud rate. If flashing fails, edit `BAUD=115200` in `f
 :::
 
 ::: tip ESP32-S3-4848 (display board)
-This board requires custom LVGL MicroPython firmware. See [PORTING.md](../../PORTING.md) for build instructions:
+This board requires custom LVGL MicroPython firmware. See [PORTING.md](https://github.com/KristianP26/ble-scale-sync/blob/main/PORTING.md) for build instructions:
 
 ```bash
 cd drivers && ./build.sh guition_4848

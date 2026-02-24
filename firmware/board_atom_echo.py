@@ -8,6 +8,7 @@ BOARD_NAME = "atom_echo"
 
 # BLE/WiFi coexistence — shared radio, must deactivate BLE after scan
 DEACTIVATE_BLE_AFTER_SCAN = True
+CONTINUOUS_SCAN = False
 
 # Scan timing
 SCAN_INTERVAL_MS = 5000

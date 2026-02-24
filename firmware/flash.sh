@@ -22,6 +22,9 @@ cd "$(dirname "$0")"
 
 # ─── Config ───────────────────────────────────────────────────────────────────
 
+# flash.sh uses pre-built MicroPython 1.27.0 binaries from micropython.org.
+# build.sh (for the Guition 4848 display board) uses MicroPython 1.24.1 source
+# because lv_binding_micropython is pinned to that version for LVGL compatibility.
 MICROPYTHON_VERSION="1.27.0"
 
 # Release dates differ per chip family
@@ -169,14 +172,15 @@ erase_and_flash() {
 
 install_libs() {
   local port="$1"
+  # aioble is from micropython-lib, version tracks MicroPython release (no separate pinning)
   blue "Installing aioble..."
   mpremote connect "$port" mip install aioble
 
   blue "Installing mqtt_as (Peter Hinch)..."
-  mpremote connect "$port" mip install github:peterhinch/micropython-mqtt
+  mpremote connect "$port" mip install "github:peterhinch/micropython-mqtt@70b56a7a4aaf"
 
   blue "Installing async primitives (mqtt_as dependency)..."
-  mpremote connect "$port" mip install github:peterhinch/micropython-async/v3/primitives
+  mpremote connect "$port" mip install "github:peterhinch/micropython-async@68b5f01e999b/v3/primitives"
 
   green "Libraries installed"
 }

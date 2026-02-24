@@ -27,6 +27,67 @@ def _norm_uuid(uuid):
     return s.lower().replace("-", "")
 
 
+def _parse_raw_entry(addr_bytes, addr_type, rssi, raw):
+    """Parse a single raw BLE advertisement into a device dict."""
+    mac = ":".join("%02X" % b for b in addr_bytes)
+    name = ""
+    services = []
+    mfr_id = None
+    mfr_data = None
+
+    i = 0
+    while i < len(raw):
+        length = raw[i]
+        if length == 0:
+            break
+        if i + 1 >= len(raw):
+            break
+        ad_type = raw[i + 1]
+        ad_payload = raw[i + 2:i + 1 + length]
+
+        if ad_type == 0x09 or ad_type == 0x08:  # Local Name
+            try:
+                name = ad_payload.decode("utf-8")
+            except Exception:
+                pass
+        elif ad_type == 0x03 or ad_type == 0x02:  # 16-bit Service UUIDs
+            for j in range(0, len(ad_payload) - 1, 2):
+                uuid = ad_payload[j] | (ad_payload[j + 1] << 8)
+                services.append("%04x" % uuid)
+        elif ad_type == 0xFF and length >= 3:  # Manufacturer Specific
+            mfr_id = ad_payload[0] | (ad_payload[1] << 8)
+            mfr_data = ad_payload[2:].hex()
+
+        i += length + 1
+
+    entry = {
+        "address": mac,
+        "name": name,
+        "rssi": rssi,
+        "services": services,
+        "addr_type": addr_type,
+    }
+    if mfr_id is not None:
+        entry["manufacturer_id"] = mfr_id
+        entry["manufacturer_data"] = mfr_data
+    return entry
+
+
+def _merge_entry(seen, entry):
+    """Merge a parsed device entry into the seen dict (dedup by MAC, strongest RSSI)."""
+    mac = entry["address"]
+    if mac in seen:
+        if entry["rssi"] > seen[mac]["rssi"]:
+            seen[mac]["rssi"] = entry["rssi"]
+        if entry["name"] and not seen[mac]["name"]:
+            seen[mac]["name"] = entry["name"]
+        if entry.get("manufacturer_data") and not seen[mac].get("manufacturer_data"):
+            seen[mac]["manufacturer_id"] = entry["manufacturer_id"]
+            seen[mac]["manufacturer_data"] = entry["manufacturer_data"]
+    else:
+        seen[mac] = entry
+
+
 class BleBridge:
     def __init__(self):
         self._conn = None
@@ -34,6 +95,12 @@ class BleBridge:
         self._notify_tasks = []
         self._on_disconnect = None
         self._disconnect_fired = False
+        # Streaming scan state
+        self._streaming = False
+        self._raw_results = []
+        self._seen = {}
+        self._seen_cycle = 0
+        self._cap_logged = False
 
     def set_on_disconnect(self, callback):
         """Set callback for unexpected peripheral disconnect (fires at most once)."""
@@ -41,7 +108,7 @@ class BleBridge:
         self._disconnect_fired = False
 
     async def scan(self, duration_ms=None):
-        """Scan for BLE peripherals using raw BLE API for reliable ad parsing.
+        """Scan for BLE peripherals using raw BLE API (batch mode).
 
         Deduplicates by address, keeps strongest RSSI but updates manufacturer
         data from any advertisement that carries it.
@@ -54,11 +121,17 @@ class BleBridge:
         seen = {}  # address -> dict
         raw_results = []  # collect raw IRQ data
 
+        _cap_logged = False
+
         def _irq(event, data):
+            nonlocal _cap_logged
             if event == 5:  # _IRQ_SCAN_RESULT
                 if len(raw_results) < board.MAX_SCAN_ENTRIES:
                     _, addr, addr_type, rssi, adv_data = data
                     raw_results.append((bytes(addr), addr_type, rssi, bytes(adv_data)))
+                elif not _cap_logged:
+                    _cap_logged = True
+                    print(f"Scan entry cap reached ({board.MAX_SCAN_ENTRIES}), ignoring further results")
 
         _ble.active(True)
         try:
@@ -70,75 +143,84 @@ class BleBridge:
             except Exception:
                 pass
 
-            # Post-process results outside the IRQ handler
             for addr_bytes, addr_type, rssi, raw in raw_results:
-                mac = ":".join("%02X" % b for b in addr_bytes)
-                name = ""
-                services = []
-                mfr_id = None
-                mfr_data = None
+                entry = _parse_raw_entry(addr_bytes, addr_type, rssi, raw)
+                _merge_entry(seen, entry)
 
-                # Parse AD structures
-                i = 0
-                while i < len(raw):
-                    length = raw[i]
-                    if length == 0:
-                        break
-                    if i + 1 >= len(raw):
-                        break
-                    ad_type = raw[i + 1]
-                    ad_payload = raw[i + 2:i + 1 + length]
-
-                    if ad_type == 0x09 or ad_type == 0x08:  # Local Name
-                        try:
-                            name = ad_payload.decode("utf-8")
-                        except Exception:
-                            pass
-                    elif ad_type == 0x03 or ad_type == 0x02:  # 16-bit Service UUIDs
-                        for j in range(0, len(ad_payload) - 1, 2):
-                            uuid = ad_payload[j] | (ad_payload[j + 1] << 8)
-                            services.append("%04x" % uuid)
-                    elif ad_type == 0xFF and length >= 3:  # Manufacturer Specific
-                        mfr_id = ad_payload[0] | (ad_payload[1] << 8)
-                        mfr_data = ad_payload[2:].hex()
-
-                    i += length + 1
-
-                # Dedup: keep strongest RSSI, but always update mfr data if new
-                if mac in seen:
-                    if rssi > seen[mac]["rssi"]:
-                        seen[mac]["rssi"] = rssi
-                    if name and not seen[mac]["name"]:
-                        seen[mac]["name"] = name
-                    if mfr_data and not seen[mac].get("manufacturer_data"):
-                        seen[mac]["manufacturer_id"] = mfr_id
-                        seen[mac]["manufacturer_data"] = mfr_data
-                else:
-                    entry = {
-                        "address": mac,
-                        "name": name,
-                        "rssi": rssi,
-                        "services": services,
-                        "addr_type": addr_type,
-                    }
-                    if mfr_id is not None:
-                        entry["manufacturer_id"] = mfr_id
-                        entry["manufacturer_data"] = mfr_data
-                    seen[mac] = entry
-
-            # Only return devices with a name OR manufacturer data (filter noise)
             results = [v for v in seen.values() if v["name"] or v.get("manufacturer_data")]
             seen.clear()
             raw_results.clear()
             return results
         finally:
             if board.DEACTIVATE_BLE_AFTER_SCAN:
-                # Deactivate BLE radio so WiFi can reconnect (shared 2.4 GHz radio)
                 try:
                     _ble.active(False)
                 except Exception:
                     pass
             gc.collect()
+
+    def start_streaming(self):
+        """Start an indefinite BLE scan (ESP32-S3 continuous mode).
+
+        IRQ handler accumulates raw results; call drain_results() periodically
+        to process and publish them.
+        """
+        import gc
+        gc.collect()
+        self._streaming = True
+        self._raw_results = []
+        self._seen = {}
+        self._seen_cycle = 0
+        self._cap_logged = False
+
+        def _irq(event, data):
+            if event == 5:  # _IRQ_SCAN_RESULT
+                if len(self._raw_results) < board.MAX_SCAN_ENTRIES:
+                    _, addr, addr_type, rssi, adv_data = data
+                    self._raw_results.append((bytes(addr), addr_type, rssi, bytes(adv_data)))
+                elif not self._cap_logged:
+                    self._cap_logged = True
+                    print(f"Streaming scan cap reached ({board.MAX_SCAN_ENTRIES}), ignoring until drain")
+
+        _ble.active(True)
+        _ble.irq(_irq)
+        _ble.gap_scan(0, 100000, 30000, True)  # duration=0 → indefinite
+        print("Streaming scan started")
+
+    def drain_results(self):
+        """Drain accumulated raw scan results and return filtered device list.
+
+        Merges into _seen dict for cross-cycle dedup. Clears _seen every
+        SEEN_RESET_CYCLES drains to age out disappeared devices.
+        """
+        # Atomically swap raw_results (IRQ appends are non-preemptive)
+        raw = self._raw_results
+        self._raw_results = []
+        self._cap_logged = False
+
+        for addr_bytes, addr_type, rssi, adv_raw in raw:
+            entry = _parse_raw_entry(addr_bytes, addr_type, rssi, adv_raw)
+            _merge_entry(self._seen, entry)
+
+        self._seen_cycle += 1
+        if self._seen_cycle >= board.SEEN_RESET_CYCLES:
+            self._seen_cycle = 0
+            results = [v for v in self._seen.values() if v["name"] or v.get("manufacturer_data")]
+            self._seen = {}
+            return results
+
+        return [v for v in self._seen.values() if v["name"] or v.get("manufacturer_data")]
+
+    def stop_streaming(self):
+        """Stop the indefinite BLE scan."""
+        if self._streaming:
+            try:
+                _ble.gap_scan(None)
+            except Exception:
+                pass
+            self._streaming = False
+            self._raw_results = []
+            print("Streaming scan stopped")
 
     async def connect(self, address, addr_type=0):
         """Connect to a BLE peripheral by MAC address, discover services/chars.
@@ -154,22 +236,29 @@ class BleBridge:
         self._chars = {}
         chars_info = []
 
-        for service in await self._conn.services():
-            for char in await service.characteristics():
-                uuid_str = _norm_uuid(char.uuid)
-                self._chars[uuid_str] = char
-                props = []
-                if char.properties & bluetooth.FLAG_READ:
-                    props.append("read")
-                if char.properties & bluetooth.FLAG_WRITE:
-                    props.append("write")
-                if char.properties & bluetooth.FLAG_NOTIFY:
-                    props.append("notify")
-                if char.properties & bluetooth.FLAG_WRITE_NO_RESPONSE:
-                    props.append("write-without-response")
-                if char.properties & bluetooth.FLAG_INDICATE:
-                    props.append("indicate")
-                chars_info.append({"uuid": uuid_str, "properties": props})
+        try:
+            services = await asyncio.wait_for(self._conn.services(), 10)
+            for service in services:
+                chars = await asyncio.wait_for(service.characteristics(), 10)
+                for char in chars:
+                    uuid_str = _norm_uuid(char.uuid)
+                    self._chars[uuid_str] = char
+                    props = []
+                    if char.properties & bluetooth.FLAG_READ:
+                        props.append("read")
+                    if char.properties & bluetooth.FLAG_WRITE:
+                        props.append("write")
+                    if char.properties & bluetooth.FLAG_NOTIFY:
+                        props.append("notify")
+                    if char.properties & bluetooth.FLAG_WRITE_NO_RESPONSE:
+                        props.append("write-without-response")
+                    if char.properties & bluetooth.FLAG_INDICATE:
+                        props.append("indicate")
+                    chars_info.append({"uuid": uuid_str, "properties": props})
+        except asyncio.TimeoutError:
+            print(f"Service discovery timed out for {address}")
+            await self.disconnect()
+            raise
 
         return {"chars": chars_info}
 

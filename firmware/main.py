@@ -130,9 +130,66 @@ async def publish_error(message):
 
 # ─── Autonomous scan loop ────────────────────────────────────────────────────
 
-async def scan_loop():
-    """Continuously scan for BLE devices and publish results."""
-    global _busy, _subs_ready, _last_beep_time
+def _check_scale_beep(results):
+    """Beep/display if a known scale MAC is present (60s debounce)."""
+    global _last_beep_time
+    if _scale_macs and time.ticks_diff(time.ticks_ms(), _last_beep_time) > 60000:
+        for r in results:
+            if r["address"] in _scale_macs:
+                _last_beep_time = time.ticks_ms()
+                print(f"Scale detected: {r['address']}")
+                if board.HAS_BEEP:
+                    beep()
+                if board.HAS_DISPLAY:
+                    ui.on_scale_detected(r["address"])
+                break
+
+
+async def _streaming_scan_loop():
+    """Continuous indefinite scan with periodic drain+publish (ESP32-S3)."""
+    global _subs_ready
+
+    # Wait for initial MQTT connection
+    while not (client.isconnected() and _subs_ready):
+        await asyncio.sleep(1)
+
+    bridge.start_streaming()
+
+    while True:
+        # Wait for MQTT to be connected and subscriptions ready
+        while not (client.isconnected() and _subs_ready):
+            await asyncio.sleep(1)
+
+        if _scan_paused:
+            await asyncio.sleep(1)
+            continue
+
+        await asyncio.sleep_ms(board.PUBLISH_INTERVAL_MS)
+
+        if _scan_paused:
+            continue
+
+        try:
+            results = bridge.drain_results()
+            gc.collect()
+            print(f"Streaming scan: {len(results)} devices (free: {gc.mem_free()})")
+            if board.HAS_DISPLAY:
+                ui.on_scan_tick(len(results))
+            _check_scale_beep(results)
+            board.on_scan_complete(results, bool(_scale_macs))
+            await client.publish(topic("scan/results"), json.dumps(results), qos=0)
+            if board.HAS_DISPLAY:
+                ui.on_publish_tick()
+        except Exception as e:
+            try:
+                await publish_error(f"Scan publish failed: {e}")
+            except Exception:
+                print(f"Scan error: {e}")
+
+
+async def _batch_scan_loop():
+    """Periodic scan-stop-publish cycle (Atom Echo / shared radio)."""
+    global _busy, _subs_ready
     _last_scan_time = 0
 
     while True:
@@ -163,17 +220,7 @@ async def scan_loop():
             print(f"Scan done: {len(results)} devices (free: {gc.mem_free()})")
             if board.HAS_DISPLAY:
                 ui.on_scan_tick(len(results))
-            # Beep/display if a known scale MAC is present (60s debounce)
-            if _scale_macs and time.ticks_diff(time.ticks_ms(), _last_beep_time) > 60000:
-                for r in results:
-                    if r["address"] in _scale_macs:
-                        _last_beep_time = time.ticks_ms()
-                        print(f"Scale detected: {r['address']}")
-                        if board.HAS_BEEP:
-                            beep()
-                        if board.HAS_DISPLAY:
-                            ui.on_scale_detected(r["address"])
-                        break
+            _check_scale_beep(results)
             # On shared-radio boards, wait for mqtt_as to reconnect after BLE disruption
             if board.DEACTIVATE_BLE_AFTER_SCAN:
                 for _ in range(30):
@@ -202,21 +249,34 @@ async def scan_loop():
             _busy = False
 
 
+async def scan_loop():
+    """Entry point — dispatches to streaming or batch scan loop."""
+    if board.CONTINUOUS_SCAN:
+        await _streaming_scan_loop()
+    else:
+        await _batch_scan_loop()
+
+
 # ─── Command handlers ─────────────────────────────────────────────────────────
 
 async def handle_connect(payload):
     """Connect to a BLE device, discover chars, start notify forwarding."""
     global _char_subscribed, _busy, _scan_paused
     _scan_paused = True  # Pause autonomous scanning
-    # Wait for any in-progress scan to finish (max 30s)
-    for _ in range(60):
-        if not _busy:
-            break
-        await asyncio.sleep_ms(500)
-    if _busy:
-        _scan_paused = False
-        await publish_error("Busy — another BLE operation is in progress")
-        return
+
+    if board.CONTINUOUS_SCAN:
+        bridge.stop_streaming()
+    else:
+        # Wait for any in-progress batch scan to finish (max 30s)
+        for _ in range(60):
+            if not _busy:
+                break
+            await asyncio.sleep_ms(500)
+        if _busy:
+            _scan_paused = False
+            await publish_error("Busy — another BLE operation is in progress")
+            return
+
     _busy = True
     try:
         data = json.loads(payload)
@@ -248,6 +308,8 @@ async def handle_connect(payload):
         await client.publish(topic("connected"), json.dumps(result), qos=0)
     except Exception as e:
         _scan_paused = False  # Resume scanning on connect failure
+        if board.CONTINUOUS_SCAN:
+            bridge.start_streaming()
         raise e
     finally:
         _busy = False
@@ -259,6 +321,8 @@ async def handle_disconnect():
     await bridge.disconnect()
     _char_subscribed = False
     _scan_paused = False  # Resume autonomous scanning
+    if board.CONTINUOUS_SCAN:
+        bridge.start_streaming()
     await client.publish(topic("disconnected"), "", qos=0)
 
 
@@ -269,6 +333,8 @@ async def handle_unexpected_disconnect():
     await bridge.disconnect()
     _char_subscribed = False
     _scan_paused = False
+    if board.CONTINUOUS_SCAN:
+        bridge.start_streaming()
     await client.publish(topic("disconnected"), "", qos=0)
 
 
@@ -369,7 +435,7 @@ async def main():
                                 total = len(raw)
                                 n_chunks = (total + CHUNK - 1) // CHUNK
                                 await client.publish(topic("screenshot/info"), json.dumps({
-                                    "w": 480, "h": 480, "fmt": "rgb565", "size": total, "chunks": n_chunks
+                                    "w": board.DISPLAY_WIDTH, "h": board.DISPLAY_HEIGHT, "fmt": "rgb565", "size": total, "chunks": n_chunks
                                 }), qos=1)
                                 for i in range(n_chunks):
                                     chunk = raw[i * CHUNK : (i + 1) * CHUNK]
