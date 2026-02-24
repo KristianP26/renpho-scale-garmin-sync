@@ -94,9 +94,7 @@ describe('StravaExporter', () => {
 
     const uploadResponse = { ok: true, status: 200 };
 
-    mockFetch
-      .mockResolvedValueOnce(refreshResponse)
-      .mockResolvedValueOnce(uploadResponse);
+    mockFetch.mockResolvedValueOnce(refreshResponse).mockResolvedValueOnce(uploadResponse);
 
     const exporter = new StravaExporter(defaultConfig);
     const result = await exporter.export(samplePayload);

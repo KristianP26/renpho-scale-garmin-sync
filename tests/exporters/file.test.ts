@@ -111,7 +111,6 @@ describe('FileExporter', () => {
       const dataCall = vi.mocked(fs.appendFileSync).mock.calls[1];
       const row = dataCall[1] as string;
       expect(row).toMatch(/,\n$/);
-
     });
   });
 
