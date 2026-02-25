@@ -1,6 +1,6 @@
 # ── Build stage: compile TypeScript ──────────────────────────────────
 ARG BUILDPLATFORM
-FROM --platform=$BUILDPLATFORM node:20-alpine AS build
+FROM --platform=$BUILDPLATFORM node:20-slim AS build
 
 WORKDIR /app
 
@@ -11,7 +11,7 @@ COPY src/ ./src/
 RUN npm run build
 
 # ── Runtime stage ────────────────────────────────────────────────────
-FROM node:20-alpine
+FROM node:20-slim
 
 # OCI labels
 ARG VERSION=dev
@@ -26,17 +26,18 @@ LABEL org.opencontainers.image.title="BLE Scale Sync" \
       org.opencontainers.image.licenses="GPL-3.0"
 
 # System dependencies: BLE (BlueZ + D-Bus), Python (Garmin upload), tini (PID 1),
-# build-base (node-gyp needs gcc/g++/make for native BLE modules)
-RUN apk add --no-cache \
+# build-essential (node-gyp needs gcc/g++/make for native BLE modules)
+RUN apt-get update && apt-get install -y --no-install-recommends \
       bluez \
-      bluez-dev \
-      libusb-dev \
-      dbus-dev \
-      dbus \
-      build-base \
+      libbluetooth-dev \
+      libusb-1.0-0-dev \
+      libdbus-1-dev \
+      build-essential \
       python3 \
-      py3-pip \
-      tini
+      python3-pip \
+      python3-venv \
+      tini \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
@@ -56,7 +57,7 @@ COPY garmin-scripts/ ./garmin-scripts/
 COPY docker-entrypoint.sh ./
 RUN chmod +x docker-entrypoint.sh
 
-# Non-root user (UID 1000 from node:20-alpine)
+# Non-root user (UID 1000 from node:20-slim)
 # chown /app so the node user can create .tmp files for atomic config writes
 RUN chown node:node /app
 USER node

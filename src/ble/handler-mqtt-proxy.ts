@@ -507,7 +507,7 @@ export class ReadingWatcher {
   private gattInProgress = false;
   private gattStartedAt = 0;
   private _client: MqttClient | null = null;
-  private _lifecycleHandlers: Array<{ event: string; handler: (...args: unknown[]) => void }> = [];
+  private _lifecycleHandlers: Array<{ event: string; handler: (...args: any[]) => void }> = [];
   private _messageHandler: ((topic: string, payload: Buffer) => void) | null = null;
   private _subscribedTopics: string[] = [];
 
@@ -624,7 +624,7 @@ export class ReadingWatcher {
 
     // Remove lifecycle handlers
     for (const { event, handler } of this._lifecycleHandlers) {
-      this._client.removeListener(event, handler);
+      this._client.removeListener(event as 'connect', handler);
     }
     this._lifecycleHandlers = [];
 
