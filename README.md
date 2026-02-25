@@ -17,7 +17,7 @@ Most BLE smart scales measure weight and body impedance over Bluetooth, but thei
 
 I didn't want to depend on a phone app. So I built this tool. A **Raspberry Pi Zero 2W** sits next to the scale, always on, always listening. Step on the scale, wait a few seconds, and the reading appears in Garmin Connect - **no phone needed, no app, no manual entry**. It just works.
 
-If you can't have a Pi next to your scale, a cheap **ESP32 proxy** can sit nearby and relay BLE data over WiFi to a Docker server anywhere on your network. See the [ESP32 BLE proxy guide](docs/guide/esp32-proxy.md).
+If you can't have a Pi next to your scale, a cheap **ESP32 proxy** can sit nearby and relay BLE data over WiFi to a Docker server anywhere on your network. See the [ESP32 BLE proxy guide](https://blescalesync.dev/guide/esp32-proxy).
 
 ## Quick Start
 
@@ -60,7 +60,7 @@ Requires Node.js v20+ and a BLE adapter. See the **[full install guide](https://
 - **[Multi-user](https://blescalesync.dev/multi-user)** — automatic weight-based identification with per-user exporters
 - **[Interactive setup wizard](https://blescalesync.dev/guide/configuration)** — scale discovery, exporter config, connectivity tests
 - **[BLE diagnostic tool](https://blescalesync.dev/troubleshooting)** — `npm run diagnose` for detailed BLE troubleshooting
-- **[ESP32 BLE proxy](docs/guide/esp32-proxy.md)** — use a remote ESP32 as a BLE radio over MQTT, with optional display for status feedback
+- **[ESP32 BLE proxy](https://blescalesync.dev/guide/esp32-proxy)** — use a remote ESP32 as a BLE radio over MQTT, with optional display for status feedback
 - **Broadcast mode** — supports non-connectable scales that only advertise weight via BLE advertisements
 - **Cross-platform** — Linux (Docker + native), macOS, Windows
 - **Private** — your data stays on your device, no vendor cloud
