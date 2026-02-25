@@ -507,6 +507,7 @@ export class ReadingWatcher {
   private gattInProgress = false;
   private gattStartedAt = 0;
   private _client: MqttClient | null = null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private _lifecycleHandlers: Array<{ event: string; handler: (...args: any[]) => void }> = [];
   private _messageHandler: ((topic: string, payload: Buffer) => void) | null = null;
   private _subscribedTopics: string[] = [];

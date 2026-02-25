@@ -7,7 +7,6 @@ import type {
   BodyComposition,
 } from '../interfaces/scale-adapter.js';
 import { uuid16 } from './body-comp-helpers.js';
-import type { ScaleBodyComp } from './body-comp-helpers.js';
 
 /**
  * Ported from openScale's QNHandler.kt
@@ -50,13 +49,6 @@ const CHR_WRITE_T1 = uuid16(0xffe3);
 // Service UUIDs for matching
 const SVC_T1 = 'ffe0';
 const SVC_T2 = 'fff0';
-
-// QN broadcast protocol marker bytes
-const QN_MARKER_0 = 0xaa;
-const QN_MARKER_1 = 0xbb;
-
-/** Minimum length of a valid QN broadcast advertisement payload. */
-const QN_BROADCAST_MIN_LEN = 26;
 
 export class QnScaleAdapter implements ScaleAdapter {
   readonly name = 'QN Scale';
