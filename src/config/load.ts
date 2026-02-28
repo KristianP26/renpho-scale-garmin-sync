@@ -114,8 +114,14 @@ function applyEnvOverrides(config: AppConfig): AppConfig {
   }
   if (process.env.BLE_HANDLER !== undefined) {
     const handler = process.env.BLE_HANDLER.toLowerCase();
-    if (handler === 'auto' || handler === 'mqtt-proxy') {
+    if (handler === 'auto') {
       ble.handler = handler;
+    } else if (handler === 'mqtt-proxy') {
+      if (ble.mqtt_proxy) {
+        ble.handler = handler;
+      } else {
+        log.warn('BLE_HANDLER=mqtt-proxy ignored: ble.mqtt_proxy not configured');
+      }
     }
   }
 

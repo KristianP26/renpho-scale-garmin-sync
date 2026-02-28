@@ -371,7 +371,9 @@ async function mqttGattConnect(
         }
       };
       client.on('message', handler);
-      client.publishAsync(t.connect, JSON.stringify({ address, addr_type: addrType })).catch(reject);
+      client
+        .publishAsync(t.connect, JSON.stringify({ address, addr_type: addrType }))
+        .catch(reject);
     }),
     COMMAND_TIMEOUT_MS,
     `GATT connect timeout for ${address}`,
