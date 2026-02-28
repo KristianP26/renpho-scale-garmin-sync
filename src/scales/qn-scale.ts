@@ -82,6 +82,14 @@ export class QnScaleAdapter implements ScaleAdapter {
    * name-only matching is needed for auto-discovery without SCALE_MAC.
    */
   matches(device: BleDeviceInfo): boolean {
+    // AABB broadcast protocol (0xFFFF company ID + 0xAABB magic header)
+    if (device.manufacturerData) {
+      const { id, data } = device.manufacturerData;
+      if (id === 0xffff && data.length >= 19 && data[0] === 0xaa && data[1] === 0xbb) {
+        return true;
+      }
+    }
+
     const name = (device.localName || '').toLowerCase();
     const nameMatch =
       name.includes('qn-scale') ||
@@ -92,9 +100,15 @@ export class QnScaleAdapter implements ScaleAdapter {
 
     // Fallback: match by QN vendor service UUID for unnamed devices
     const uuids = (device.serviceUuids || []).map((u) => u.toLowerCase());
-    return uuids.some(
-      (u) => u === SVC_T1 || u === SVC_T2 || u === uuid16(0xffe0) || u === uuid16(0xfff0),
-    );
+    if (
+      uuids.some(
+        (u) => u === SVC_T1 || u === SVC_T2 || u === uuid16(0xffe0) || u === uuid16(0xfff0),
+      )
+    ) {
+      return true;
+    }
+
+    return false;
   }
 
   /**
@@ -152,12 +166,45 @@ export class QnScaleAdapter implements ScaleAdapter {
     return { weight, impedance };
   }
 
+  /**
+   * Parse AABB broadcast protocol (manufacturer data with company ID 0xFFFF).
+   *
+   * Layout (after company ID bytes):
+   *   [0-1]   0xAABB — magic header
+   *   [2-7]   MAC address of the device
+   *   [8]     sequence / status byte
+   *   [9-14]  unknown
+   *   [15]    status flags — bit 5 (0x20) = measurement stable
+   *   [16]    unknown
+   *   [17-18] weight: little-endian uint16 / 100 = kg
+   *   [19-22] unknown (possibly impedance/checksum)
+   *
+   * No impedance is available from the broadcast — body composition is estimated
+   * using the Deurenberg formula (BMI + age + gender).
+   */
+  parseBroadcast(manufacturerData: Buffer): ScaleReading | null {
+    if (manufacturerData.length < 19) return null;
+    if (manufacturerData[0] !== 0xaa || manufacturerData[1] !== 0xbb) return null;
+
+    // Only accept stable readings (bit 5 of byte 15 = "measurement settled")
+    if ((manufacturerData[15] & 0x20) === 0) return null;
+
+    const weight = manufacturerData.readUInt16LE(17) / 100;
+    if (weight <= 0 || !Number.isFinite(weight)) return null;
+
+    return { weight, impedance: 0 };
+  }
+
   isComplete(reading: ScaleReading): boolean {
+    // Broadcast readings have impedance=0; GATT readings have impedance>200
+    if (reading.impedance === 0) return reading.weight > 0;
     return reading.weight > 10 && reading.impedance > 200;
   }
 
   computeMetrics(reading: ScaleReading, profile: UserProfile): BodyComposition {
-    const fat = computeBiaFat(reading.weight, reading.impedance, profile);
+    // In broadcast mode impedance is 0 — skip BIA, let buildPayload use Deurenberg fallback
+    const fat =
+      reading.impedance > 0 ? computeBiaFat(reading.weight, reading.impedance, profile) : undefined;
     return buildPayload(reading.weight, reading.impedance, { fat }, profile);
   }
 }

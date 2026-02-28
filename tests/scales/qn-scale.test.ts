@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { QnScaleAdapter } from '../../src/scales/qn-scale.js';
+import type { BleDeviceInfo } from '../../src/interfaces/scale-adapter.js';
 import {
   mockPeripheral,
   defaultProfile,
@@ -8,6 +9,24 @@ import {
 
 function makeAdapter() {
   return new QnScaleAdapter();
+}
+
+/** Build a fake AABB broadcast buffer with the given weight and stability. */
+function makeBroadcast(weightKg: number, stable: boolean): Buffer {
+  const buf = Buffer.alloc(23);
+  buf[0] = 0xaa;
+  buf[1] = 0xbb;
+  buf[15] = stable ? 0x23 : 0x04;
+  buf.writeUInt16LE(Math.round(weightKg * 100), 17);
+  return buf;
+}
+
+function mockBroadcastDevice(data: Buffer): BleDeviceInfo {
+  return {
+    localName: 'QN-Scale',
+    serviceUuids: [],
+    manufacturerData: { id: 0xffff, data },
+  };
 }
 
 describe('QnScaleAdapter', () => {
@@ -70,6 +89,50 @@ describe('QnScaleAdapter', () => {
       const adapter = makeAdapter();
       const p = mockPeripheral('qn-scale', ['fff0']);
       expect(adapter.matches(p)).toBe(true);
+    });
+
+    it('matches AABB broadcast header with company ID 0xFFFF', () => {
+      const adapter = makeAdapter();
+      expect(adapter.matches(mockBroadcastDevice(makeBroadcast(70, true)))).toBe(true);
+    });
+
+    it('rejects broadcast without manufacturer data', () => {
+      const adapter = makeAdapter();
+      expect(adapter.matches({ localName: 'Unknown', serviceUuids: [] })).toBe(false);
+    });
+
+    it('rejects broadcast with wrong company ID', () => {
+      const adapter = makeAdapter();
+      const dev: BleDeviceInfo = {
+        localName: 'Unknown',
+        serviceUuids: [],
+        manufacturerData: { id: 0x0001, data: makeBroadcast(70, true) },
+      };
+      expect(adapter.matches(dev)).toBe(false);
+    });
+
+    it('rejects broadcast buffer without AABB magic', () => {
+      const adapter = makeAdapter();
+      const buf = Buffer.alloc(23);
+      const dev: BleDeviceInfo = {
+        localName: 'Unknown',
+        serviceUuids: [],
+        manufacturerData: { id: 0xffff, data: buf },
+      };
+      expect(adapter.matches(dev)).toBe(false);
+    });
+
+    it('rejects broadcast with too-short buffer', () => {
+      const adapter = makeAdapter();
+      const buf = Buffer.alloc(10);
+      buf[0] = 0xaa;
+      buf[1] = 0xbb;
+      const dev: BleDeviceInfo = {
+        localName: 'Unknown',
+        serviceUuids: [],
+        manufacturerData: { id: 0xffff, data: buf },
+      };
+      expect(adapter.matches(dev)).toBe(false);
     });
   });
 
@@ -210,25 +273,67 @@ describe('QnScaleAdapter', () => {
     });
   });
 
+  describe('parseBroadcast()', () => {
+    it('parses stable reading', () => {
+      const adapter = makeAdapter();
+      const reading = adapter.parseBroadcast(makeBroadcast(72.5, true));
+      expect(reading).not.toBeNull();
+      expect(reading!.weight).toBe(72.5);
+      expect(reading!.impedance).toBe(0);
+    });
+
+    it('returns null for unstable reading', () => {
+      const adapter = makeAdapter();
+      expect(adapter.parseBroadcast(makeBroadcast(72.5, false))).toBeNull();
+    });
+
+    it('returns null for zero weight', () => {
+      const adapter = makeAdapter();
+      expect(adapter.parseBroadcast(makeBroadcast(0, true))).toBeNull();
+    });
+
+    it('returns null for too-short buffer', () => {
+      const adapter = makeAdapter();
+      expect(adapter.parseBroadcast(Buffer.alloc(10))).toBeNull();
+    });
+
+    it('returns null for wrong magic header', () => {
+      const adapter = makeAdapter();
+      const buf = makeBroadcast(70, true);
+      buf[0] = 0x00;
+      expect(adapter.parseBroadcast(buf)).toBeNull();
+    });
+  });
+
   describe('isComplete()', () => {
-    it('returns true for weight > 10 and impedance > 200', () => {
+    it('returns true for GATT reading (weight > 10 and impedance > 200)', () => {
       const adapter = makeAdapter();
       expect(adapter.isComplete({ weight: 80, impedance: 500 })).toBe(true);
     });
 
-    it('returns false when weight <= 10', () => {
+    it('returns true for broadcast reading (weight > 0 and impedance = 0)', () => {
+      const adapter = makeAdapter();
+      expect(adapter.isComplete({ weight: 72.5, impedance: 0 })).toBe(true);
+    });
+
+    it('returns false for broadcast reading with zero weight', () => {
+      const adapter = makeAdapter();
+      expect(adapter.isComplete({ weight: 0, impedance: 0 })).toBe(false);
+    });
+
+    it('returns false when GATT weight <= 10', () => {
       const adapter = makeAdapter();
       expect(adapter.isComplete({ weight: 5, impedance: 500 })).toBe(false);
     });
 
-    it('returns false when impedance <= 200', () => {
+    it('returns false when GATT impedance <= 200', () => {
       const adapter = makeAdapter();
       expect(adapter.isComplete({ weight: 80, impedance: 100 })).toBe(false);
     });
   });
 
   describe('computeMetrics()', () => {
-    it('returns all BodyComposition fields', () => {
+    it('returns all BodyComposition fields (GATT with impedance)', () => {
       const adapter = makeAdapter();
       const profile = defaultProfile();
       const payload = adapter.computeMetrics({ weight: 80, impedance: 500 }, profile);
@@ -238,13 +343,33 @@ describe('QnScaleAdapter', () => {
       assertPayloadRanges(payload);
     });
 
+    it('returns BodyComposition for broadcast reading (no impedance)', () => {
+      const adapter = makeAdapter();
+      const profile = defaultProfile();
+      const payload = adapter.computeMetrics({ weight: 75, impedance: 0 }, profile);
+      expect(payload.weight).toBe(75);
+      expect(payload.impedance).toBe(0);
+      assertPayloadRanges(payload);
+    });
+
     it('returns payload even with zero weight (guarded by isComplete in practice)', () => {
       const adapter = makeAdapter();
       const profile = defaultProfile();
-      // Zero weight is prevented by isComplete() (weight > 10 && impedance > 200),
-      // but computeMetrics itself does not throw — it delegates to buildPayload.
       const payload = adapter.computeMetrics({ weight: 0, impedance: 500 }, profile);
       expect(payload.weight).toBe(0);
+    });
+
+    it('uses Deurenberg fallback when impedance is 0 (broadcast mode)', () => {
+      const adapter = makeAdapter();
+      const profile = defaultProfile();
+      const payload = adapter.computeMetrics({ weight: 80, impedance: 0 }, profile);
+
+      expect(payload.weight).toBe(80);
+      expect(payload.impedance).toBe(0);
+      // Deurenberg formula produces a reasonable body fat estimate from BMI
+      expect(payload.bodyFatPercent).toBeGreaterThan(5);
+      expect(payload.bodyFatPercent).toBeLessThan(40);
+      assertPayloadRanges(payload);
     });
   });
 });

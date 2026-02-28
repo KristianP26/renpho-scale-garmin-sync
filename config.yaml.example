@@ -15,9 +15,19 @@ version: 1
 # ble:
 #   scale_mac: "FF:03:00:13:A1:04"   # Run "npm run scan" to find yours
 #   noble_driver: abandonware         # "abandonware" | "stoprocent"
+#   handler: auto                     # "auto" | "mqtt-proxy"
 #
 # scale_mac: omit for auto-discovery. On macOS, use the CoreBluetooth UUID.
 # noble_driver: default is node-ble (Linux), abandonware (Windows), stoprocent (macOS).
+# handler: "auto" uses local Bluetooth. "mqtt-proxy" uses an ESP32 BLE-to-MQTT bridge.
+#
+# --- ESP32 MQTT Proxy (when handler: mqtt-proxy) ---
+#   mqtt_proxy:
+#     broker_url: "mqtt://192.168.1.50:1883"  # MQTT broker URL
+#     device_id: esp32-ble-proxy               # must match ESP32 config.json
+#     topic_prefix: ble-proxy                  # must match ESP32 config.json
+#     username: myuser                         # optional
+#     password: "${MQTT_PASSWORD}"             # optional
 
 # --- Scale Units ---
 
@@ -52,6 +62,10 @@ users:
     #     email: alice@example.com
     #     password: "${GARMIN_PASSWORD_ALICE}"
     #     token_dir: ./garmin-tokens/alice
+    #   - type: strava
+    #     client_id: "${STRAVA_CLIENT_ID}"
+    #     client_secret: "${STRAVA_CLIENT_SECRET}"
+    #     token_dir: ./strava-tokens/alice   # run "npm run setup-strava" after config
 
   - name: Bob
     slug: bob
@@ -110,6 +124,11 @@ global_exporters:
   #   token: "${NTFY_TOKEN}"               # Bearer token auth
   #   # username: myuser                   # or Basic auth
   #   # password: "${NTFY_PASSWORD}"
+
+  # -- File (CSV/JSONL) --
+  # - type: file
+  #   file_path: "./measurements.csv"      # path to output file
+  #   format: csv                          # "csv" or "jsonl"
 
 # --- Runtime Settings ---
 

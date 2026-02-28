@@ -4,7 +4,7 @@ layout: home
 hero:
   name: BLE Scale Sync
   text: Automatic body composition sync
-  tagline: Cross-platform CLI for Linux, macOS & Windows. Read weight & impedance from 23 BLE smart scales and export to Garmin Connect, Home Assistant, InfluxDB, Webhooks & Ntfy. No phone app needed.
+  tagline: Cross-platform CLI for Linux, macOS & Windows. Read weight & impedance from 23 BLE smart scales and export to Garmin Connect, Strava, Home Assistant, InfluxDB, Webhooks, Ntfy & local files. No phone app needed.
   image:
     src: /logo.svg
     alt: BLE Scale Sync
@@ -23,8 +23,8 @@ features:
     link: /guide/supported-scales
     linkText: See all scales
   - icon: "\uD83D\uDCE4"
-    title: 5 Export Targets
-    details: Garmin Connect &bull; MQTT (Home Assistant) &bull; InfluxDB &bull; Webhook &bull; Ntfy
+    title: 7 Export Targets
+    details: Garmin Connect &bull; Strava &bull; MQTT (Home Assistant) &bull; InfluxDB &bull; Webhook &bull; Ntfy &bull; File (CSV/JSONL)
     link: /exporters
     linkText: Configure exporters
   - icon: "\uD83E\uDDE0"
@@ -42,6 +42,16 @@ features:
     details: Runs natively on Linux, macOS & Windows. Docker images available for Linux.
     link: /guide/getting-started
     linkText: Install guide
+  - icon: "\uD83D\uDCE1"
+    title: ESP32 BLE Proxy
+    details: Use a cheap ESP32 as a remote Bluetooth radio over MQTT. No BLE adapter needed on the server. Optional display board for live status.
+    link: /guide/esp32-proxy
+    linkText: Proxy setup guide
+  - icon: "\uD83E\uDDD9"
+    title: Setup Wizard
+    details: Interactive CLI wizard that discovers scales, configures exporters, tests connectivity, and generates your config.yaml.
+    link: /guide/configuration
+    linkText: Configuration guide
   - icon: "\uD83D\uDD12"
     title: Private & Self-Hosted
     details: Your data stays on your device. No vendor cloud, no account, no tracking. Fully open source.
@@ -57,13 +67,16 @@ features:
 # Configure
 docker run --rm -it --network host --cap-add NET_ADMIN --cap-add NET_RAW \
   --group-add 112 -v /var/run/dbus:/var/run/dbus:ro \
-  -v ./config.yaml:/app/config.yaml ghcr.io/kristianp26/ble-scale-sync:latest setup
+  -v ./config.yaml:/app/config.yaml \
+  -v garmin-tokens:/app/garmin-tokens \
+  ghcr.io/kristianp26/ble-scale-sync:latest setup
 
 # Run (continuous mode, auto-restart)
 docker run -d --restart unless-stopped --network host \
   --cap-add NET_ADMIN --cap-add NET_RAW \
   --group-add 112 -v /var/run/dbus:/var/run/dbus:ro \
   -v ./config.yaml:/app/config.yaml:ro \
+  -v garmin-tokens:/app/garmin-tokens \
   -e CONTINUOUS_MODE=true \
   ghcr.io/kristianp26/ble-scale-sync:latest
 ```
@@ -75,7 +88,7 @@ Ideal for Raspberry Pi and headless servers. Your data never leaves your network
 ```bash
 git clone https://github.com/KristianP26/ble-scale-sync.git
 cd ble-scale-sync && npm install
-npm run setup    # interactive wizard — scale discovery, user profile, exporters
+npm run setup    # interactive wizard: scale discovery, user profile, exporters
 CONTINUOUS_MODE=true npm start   # always-on, listens for scale indefinitely
 ```
 
@@ -107,7 +120,13 @@ sudo systemctl enable --now ble-scale.service
 :::
 
 ::: tip Raspberry Pi Zero 2W
-The ideal setup: a [$15 single-board computer](https://www.raspberrypi.com/products/raspberry-pi-zero-2-w/) with built-in BLE, always on, always listening. Step on the scale and your data appears in Garmin Connect within seconds — no phone needed. Note: the original Pi Zero W (ARMv6) is [not supported](/troubleshooting#install-fails-on-raspberry-pi-zero-w-first-gen).
+The ideal setup: a [~15€ single-board computer](https://www.raspberrypi.com/products/raspberry-pi-zero-2-w/) with built-in BLE, always on, always listening. Step on the scale and your data appears in Garmin Connect within seconds. No phone needed. Note: the original Pi Zero W (ARMv6) is [not supported](/troubleshooting#install-fails-on-raspberry-pi-zero-w-first-gen).
+:::
+
+::: tip Two ways to connect your scale
+**Local BLE** (Options 1 & 2): the server has a Bluetooth adapter and talks to the scale directly. Needs BlueZ/D-Bus on Linux, or native BLE on macOS/Windows.
+
+**Remote BLE via ESP32**: a cheap ~8€ ESP32 board sits near the scale and relays BLE data over WiFi/MQTT. The server needs no Bluetooth at all, which makes Docker deployment much simpler (no `NET_ADMIN`, no D-Bus mounts). See the [ESP32 BLE Proxy guide](/guide/esp32-proxy).
 :::
 
 <div style="text-align: center; margin-top: 2rem;">

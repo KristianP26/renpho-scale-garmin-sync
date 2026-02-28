@@ -10,13 +10,15 @@ import { MqttExporter } from '../../src/exporters/mqtt.js';
 import { WebhookExporter } from '../../src/exporters/webhook.js';
 import { InfluxDbExporter } from '../../src/exporters/influxdb.js';
 import { NtfyExporter } from '../../src/exporters/ntfy.js';
+import { FileExporter } from '../../src/exporters/file.js';
+import { StravaExporter } from '../../src/exporters/strava.js';
 import type { ExporterEntry } from '../../src/config/schema.js';
 
 // ─── EXPORTER_REGISTRY ─────────────────────────────────────────────────────
 
 describe('EXPORTER_REGISTRY', () => {
-  it('contains 5 exporter entries', () => {
-    expect(EXPORTER_REGISTRY).toHaveLength(5);
+  it('contains 7 exporter entries', () => {
+    expect(EXPORTER_REGISTRY).toHaveLength(7);
   });
 
   it('has entries for all known exporters', () => {
@@ -26,6 +28,8 @@ describe('EXPORTER_REGISTRY', () => {
     expect(names).toContain('webhook');
     expect(names).toContain('influxdb');
     expect(names).toContain('ntfy');
+    expect(names).toContain('file');
+    expect(names).toContain('strava');
   });
 
   it('each entry has a schema and factory', () => {
@@ -43,8 +47,8 @@ describe('EXPORTER_REGISTRY', () => {
 // ─── EXPORTER_SCHEMAS ──────────────────────────────────────────────────────
 
 describe('EXPORTER_SCHEMAS', () => {
-  it('derives 5 schemas from registry', () => {
-    expect(EXPORTER_SCHEMAS).toHaveLength(5);
+  it('derives 7 schemas from registry', () => {
+    expect(EXPORTER_SCHEMAS).toHaveLength(7);
   });
 
   it('each schema has required fields', () => {
@@ -110,14 +114,44 @@ describe('EXPORTER_SCHEMAS', () => {
     expect(requiredFields).toHaveLength(1);
     expect(requiredFields[0].key).toBe('topic');
   });
+
+  it('file schema supports both global and per-user', () => {
+    const file = EXPORTER_SCHEMAS.find((s) => s.name === 'file');
+    expect(file).toBeDefined();
+    expect(file!.supportsGlobal).toBe(true);
+    expect(file!.supportsPerUser).toBe(true);
+  });
+
+  it('file schema has file_path as required field', () => {
+    const file = EXPORTER_SCHEMAS.find((s) => s.name === 'file');
+    const requiredFields = file!.fields.filter((f) => f.required);
+    expect(requiredFields).toHaveLength(1);
+    expect(requiredFields[0].key).toBe('file_path');
+  });
+
+  it('strava schema supports per-user only', () => {
+    const strava = EXPORTER_SCHEMAS.find((s) => s.name === 'strava');
+    expect(strava).toBeDefined();
+    expect(strava!.supportsGlobal).toBe(false);
+    expect(strava!.supportsPerUser).toBe(true);
+  });
+
+  it('strava schema has client_id and client_secret as required fields', () => {
+    const strava = EXPORTER_SCHEMAS.find((s) => s.name === 'strava');
+    const requiredFields = strava!.fields.filter((f) => f.required);
+    expect(requiredFields).toHaveLength(2);
+    const keys = requiredFields.map((f) => f.key);
+    expect(keys).toContain('client_id');
+    expect(keys).toContain('client_secret');
+  });
 });
 
 // ─── KNOWN_EXPORTER_NAMES ──────────────────────────────────────────────────
 
 describe('KNOWN_EXPORTER_NAMES', () => {
-  it('is a Set with 5 entries', () => {
+  it('is a Set with 7 entries', () => {
     expect(KNOWN_EXPORTER_NAMES).toBeInstanceOf(Set);
-    expect(KNOWN_EXPORTER_NAMES.size).toBe(5);
+    expect(KNOWN_EXPORTER_NAMES.size).toBe(7);
   });
 
   it('contains all exporter names', () => {
@@ -126,6 +160,8 @@ describe('KNOWN_EXPORTER_NAMES', () => {
     expect(KNOWN_EXPORTER_NAMES.has('webhook')).toBe(true);
     expect(KNOWN_EXPORTER_NAMES.has('influxdb')).toBe(true);
     expect(KNOWN_EXPORTER_NAMES.has('ntfy')).toBe(true);
+    expect(KNOWN_EXPORTER_NAMES.has('file')).toBe(true);
+    expect(KNOWN_EXPORTER_NAMES.has('strava')).toBe(true);
   });
 });
 
@@ -222,5 +258,47 @@ describe('createExporterFromEntry()', () => {
     };
     const exporter = createExporterFromEntry(entry);
     expect(exporter).toBeInstanceOf(NtfyExporter);
+  });
+
+  it('creates FileExporter from entry', () => {
+    const entry: ExporterEntry = {
+      type: 'file',
+      file_path: '/tmp/measurements.csv',
+    };
+    const exporter = createExporterFromEntry(entry);
+    expect(exporter).toBeInstanceOf(FileExporter);
+    expect(exporter.name).toBe('file');
+  });
+
+  it('creates FileExporter with jsonl format', () => {
+    const entry: ExporterEntry = {
+      type: 'file',
+      file_path: '/tmp/data.jsonl',
+      format: 'jsonl',
+    };
+    const exporter = createExporterFromEntry(entry);
+    expect(exporter).toBeInstanceOf(FileExporter);
+  });
+
+  it('creates StravaExporter from entry', () => {
+    const entry: ExporterEntry = {
+      type: 'strava',
+      client_id: '12345',
+      client_secret: 'secret',
+    };
+    const exporter = createExporterFromEntry(entry);
+    expect(exporter).toBeInstanceOf(StravaExporter);
+    expect(exporter.name).toBe('strava');
+  });
+
+  it('creates StravaExporter with custom token_dir', () => {
+    const entry: ExporterEntry = {
+      type: 'strava',
+      client_id: '12345',
+      client_secret: 'secret',
+      token_dir: './custom-tokens',
+    };
+    const exporter = createExporterFromEntry(entry);
+    expect(exporter).toBeInstanceOf(StravaExporter);
   });
 });

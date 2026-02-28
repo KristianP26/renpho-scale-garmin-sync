@@ -1,5 +1,5 @@
 import type { ScaleAdapter, UserProfile, ScaleReading } from '../interfaces/scale-adapter.js';
-import type { WeightUnit } from '../config/schema.js';
+import type { WeightUnit, MqttProxyConfig } from '../config/schema.js';
 import { createLogger } from '../logger.js';
 import { errMsg } from '../utils/error.js';
 export { errMsg };
@@ -28,6 +28,8 @@ export interface ScanOptions {
   weightUnit?: WeightUnit;
   onLiveData?: (reading: ScaleReading) => void;
   abortSignal?: AbortSignal;
+  bleHandler?: 'auto' | 'mqtt-proxy';
+  mqttProxy?: MqttProxyConfig;
 }
 
 export interface ScanResult {
