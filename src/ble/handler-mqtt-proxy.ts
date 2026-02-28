@@ -371,7 +371,7 @@ async function mqttGattConnect(
         }
       };
       client.on('message', handler);
-      client.publishAsync(t.connect, JSON.stringify({ address, addr_type: addrType }));
+      client.publishAsync(t.connect, JSON.stringify({ address, addr_type: addrType })).catch(reject);
     }),
     COMMAND_TIMEOUT_MS,
     `GATT connect timeout for ${address}`,
@@ -530,31 +530,37 @@ export class ReadingWatcher {
     this.started = true;
 
     const t = topics(this.config.topic_prefix, this.config.device_id);
-    const client = await getOrCreatePersistentClient(this.config);
-    this._client = client;
+    let client: Awaited<ReturnType<typeof getOrCreatePersistentClient>>;
+    try {
+      client = await getOrCreatePersistentClient(this.config);
+      this._client = client;
 
-    // Lifecycle logging — store references for cleanup
-    const onReconnect = () => bleLog.info('MQTT reconnecting...');
-    const onOffline = () => bleLog.warn('MQTT client offline');
-    const onError = (err: Error) => bleLog.warn(`MQTT error: ${err.message}`);
-    const onConnect = () => bleLog.info('MQTT connected');
-    client.on('reconnect', onReconnect);
-    client.on('offline', onOffline);
-    client.on('error', onError);
-    client.on('connect', onConnect);
-    this._lifecycleHandlers = [
-      { event: 'reconnect', handler: onReconnect },
-      { event: 'offline', handler: onOffline },
-      { event: 'error', handler: onError },
-      { event: 'connect', handler: onConnect },
-    ];
+      // Lifecycle logging — store references for cleanup
+      const onReconnect = () => bleLog.info('MQTT reconnecting...');
+      const onOffline = () => bleLog.warn('MQTT client offline');
+      const onError = (err: Error) => bleLog.warn(`MQTT error: ${err.message}`);
+      const onConnect = () => bleLog.info('MQTT connected');
+      client.on('reconnect', onReconnect);
+      client.on('offline', onOffline);
+      client.on('error', onError);
+      client.on('connect', onConnect);
+      this._lifecycleHandlers = [
+        { event: 'reconnect', handler: onReconnect },
+        { event: 'offline', handler: onOffline },
+        { event: 'error', handler: onError },
+        { event: 'connect', handler: onConnect },
+      ];
 
-    // Subscribe to scan results with QoS 1
-    await client.subscribeAsync(t.scanResults, { qos: 1 });
-    // Subscribe to status for logging only
-    await client.subscribeAsync(t.status);
-    this._subscribedTopics = [t.scanResults, t.status];
-    bleLog.info('ReadingWatcher started — listening for scan results');
+      // Subscribe to scan results with QoS 1
+      await client.subscribeAsync(t.scanResults, { qos: 1 });
+      // Subscribe to status for logging only
+      await client.subscribeAsync(t.status);
+      this._subscribedTopics = [t.scanResults, t.status];
+      bleLog.info('ReadingWatcher started — listening for scan results');
+    } catch (err) {
+      this.started = false;
+      throw err;
+    }
 
     // Message handler — store reference for cleanup
     this._messageHandler = (topic: string, payload: Buffer) => {

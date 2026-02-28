@@ -19,13 +19,18 @@ export function atomicWrite(filePath: string, content: string): void {
     try {
       if (existsSync(filePath)) unlinkSync(filePath);
       renameSync(tmpPath, filePath);
-    } catch {
-      // Rename failed (Docker bind mount, Windows EPERM, etc.) — overwrite directly
-      writeFileSync(filePath, content, 'utf8');
-      try {
-        unlinkSync(tmpPath);
-      } catch {
-        /* ignore */
+    } catch (renameErr: unknown) {
+      const code = renameErr instanceof Error ? (renameErr as NodeJS.ErrnoException).code : '';
+      if (code === 'EBUSY' || code === 'EPERM' || code === 'EXDEV') {
+        // Docker bind mount, Windows EPERM, cross-device rename: overwrite directly
+        writeFileSync(filePath, content, 'utf8');
+        try {
+          unlinkSync(tmpPath);
+        } catch {
+          /* ignore */
+        }
+      } else {
+        throw renameErr;
       }
     }
   } catch (err) {

@@ -122,9 +122,12 @@ export async function scanDevices(
   mqttProxy?: import('../config/schema.js').MqttProxyConfig,
 ): Promise<ScanResult[]> {
   if (bleHandler === 'mqtt-proxy') {
+    if (!mqttProxy) {
+      throw new Error('mqtt_proxy config is required when ble.handler is mqtt-proxy');
+    }
     bleLog.debug('BLE handler: mqtt-proxy (ESP32)');
     const { scanDevices: impl } = await import('./handler-mqtt-proxy.js');
-    return impl(adapters, durationMs, mqttProxy!);
+    return impl(adapters, durationMs, mqttProxy);
   }
 
   const driver = resolveNobleDriver();
