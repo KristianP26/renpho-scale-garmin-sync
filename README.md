@@ -65,12 +65,6 @@ Requires Node.js v20+ and a BLE adapter. See the **[full install guide](https://
 - **Cross-platform** — Linux (Docker + native), macOS, Windows
 - **Private** — your data stays on your device, no vendor cloud
 
-<p align="center">
-  <img src="docs/images/esp32-display.png" alt="ESP32 display showing BLE Scale Sync status" width="240">
-  <br>
-  <em>Optional ESP32-S3-4848 display board showing scan status and connection indicators</em>
-</p>
-
 ## Credits
 
 - **Scale protocols** - ported from [openScale](https://github.com/oliexdev/openScale) by oliexdev and contributors
