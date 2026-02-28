@@ -681,15 +681,18 @@ export class ReadingWatcher {
 
     const t = topics(this.config.topic_prefix, this.config.device_id);
     const client = await getOrCreatePersistentClient(this.config);
-    const dummyProfile: UserProfile = this.profile ?? {
+    if (!this.profile) {
+      bleLog.warn(
+        'No user profile configured for GATT reading. Body composition will be inaccurate. ' +
+          'Set a user profile in config.yaml to get correct results.',
+      );
+    }
+    const profile: UserProfile = this.profile ?? {
       height: 170,
       age: 30,
       gender: 'male',
       isAthlete: false,
     };
-    if (!this.profile) {
-      bleLog.warn('No user profile configured — using fallback profile for GATT reading');
-    }
 
     bleLog.info(`Connecting via GATT proxy to ${adapter.name} (${entry.address})...`);
     const { charMap, device } = await mqttGattConnect(
@@ -700,7 +703,7 @@ export class ReadingWatcher {
     );
     try {
       const raw = await withTimeout(
-        waitForRawReading(charMap, device, adapter, dummyProfile),
+        waitForRawReading(charMap, device, adapter, profile),
         60_000,
         `GATT reading timeout for ${entry.address}`,
       );
