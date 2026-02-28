@@ -312,9 +312,9 @@ class MqttBleChar implements BleChar {
         COMMAND_TIMEOUT_MS,
         `Read response timeout for ${this.uuid}`,
       );
-    } catch (err) {
+    } finally {
       this.client.removeListener('message', handler);
-      throw err;
+      this.client.unsubscribeAsync(responseTopic).catch(() => {});
     }
   }
 }
