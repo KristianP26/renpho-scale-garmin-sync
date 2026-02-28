@@ -5,17 +5,17 @@ description: Use an ESP32 as a remote BLE-to-MQTT bridge for headless or Docker 
 
 # ESP32 BLE Proxy
 
-Use a cheap ESP32 board as a remote Bluetooth radio, communicating over MQTT. This lets you run BLE Scale Sync on machines without local Bluetooth - headless servers, Docker containers, or devices where the built-in radio has poor range.
+Use a cheap ESP32 board as a remote Bluetooth radio, communicating over MQTT. This lets you run BLE Scale Sync on machines without local Bluetooth: headless servers, Docker containers, or devices where the built-in radio has poor range.
 
 The ESP32 scans autonomously for BLE advertisements and publishes results over MQTT. BLE Scale Sync matches scale adapters against the scan data, identifies users by weight, computes body composition, and dispatches to exporters. For scales that require a GATT connection, the server sends connect/write/read commands back to the ESP32 over MQTT. All scale-specific logic stays on the server.
 
 ## How It Works
 
 ```
-┌─────────┐   BLE    ┌──────────┐   MQTT   ┌────────────────┐
-│  Scale   │ ──────── │  ESP32   │ ──────── │ BLE Scale Sync │
-└─────────┘  advert  └──────────┘          └────────────────┘
-             + GATT  MicroPython              Docker / Node.js
+┌───────┐  BLE   ┌────────┐  MQTT  ┌─────────────┐  MQTT  ┌────────────────┐
+│ Scale │ ────── │ ESP32  │ ────── │ MQTT Broker │ ────── │ BLE Scale Sync │
+└───────┘ advert └────────┘        └─────────────┘        └────────────────┘
+          + GATT  MicroPython       e.g. Mosquitto          Docker / Node.js
 ```
 
 **Broadcast scales** (weight in BLE advertisements):
@@ -28,25 +28,25 @@ The ESP32 scans autonomously for BLE advertisements and publishes results over M
 
 **GATT scales** (notification-based readings):
 
-1. A matched adapter has no broadcast data — the server sends a `connect` command
+1. A matched adapter has no broadcast data, so the server sends a `connect` command
 2. The ESP32 connects to the scale, discovers characteristics, and reports them
 3. The server subscribes to notification topics and sends write commands (e.g. unlock)
 4. Scale readings arrive as notifications, forwarded to the server via MQTT
 5. The server sends a `disconnect` command when the reading is complete
 
-Both **broadcast scales** (weight embedded in BLE advertisements) and **GATT scales** (requiring a connection for notification-based readings) are supported. When a matched adapter has no broadcast data, the proxy automatically falls back to a GATT connection through the ESP32.
-
 ## Supported Boards
 
 Any ESP32 board running MicroPython with BLE support works. Tested on:
 
-| Board                          | Notes                                                                 |
-| ------------------------------ | --------------------------------------------------------------------- |
-| M5Stack Atom Echo (ESP32-PICO) | Tiny, no PSRAM, ~100 KB free RAM, I2S buzzer for beep feedback        |
-| ESP32-S3-DevKitC               | Standard dev board, plenty of RAM                                     |
-| Guition ESP32-S3-4848S040      | 480x480 RGB display, shows scan status and export results via LVGL UI |
+| Board                          | Price | Notes                                                                 |
+| ------------------------------ | ----- | --------------------------------------------------------------------- |
+| M5Stack Atom Echo (ESP32-PICO) | ~8€   | Tiny, no PSRAM, ~100 KB free RAM, I2S buzzer for beep feedback        |
+| ESP32-S3-DevKitC               | ~12€  | Standard dev board, plenty of RAM                                     |
+| Guition ESP32-S3-4848S040      | ~25€  | 480x480 RGB display, shows scan status and export results via LVGL UI |
 
 The board is auto-detected from the chip family. Set `"board"` in `config.json` to override (e.g. `"guition_4848"` for the display board, `"atom_echo"` for the Atom Echo).
+
+![Guition 4848 display showing scan status and user results](/images/esp32-display.png)
 
 ::: warning Not compatible
 ESP32-C3 and ESP32-C6 boards use a different BLE stack in MicroPython and have not been tested. Classic ESP32 and ESP32-S3 are recommended.
@@ -158,7 +158,15 @@ ble:
     # password: '${MQTT_PASSWORD}'    # optional
 ```
 
-Then restart BLE Scale Sync. In continuous mode, the server maintains a persistent MQTT connection and reacts to scan results as they arrive - no polling delay.
+Then restart BLE Scale Sync. In continuous mode, the server maintains a persistent MQTT connection and reacts to scan results as they arrive.
+
+::: tip Environment variable
+You can also set `BLE_HANDLER=mqtt-proxy` as an environment variable instead of editing `config.yaml`.
+:::
+
+::: tip Setup wizard
+`npm run setup` includes interactive mqtt-proxy configuration steps that generate the YAML above for you.
+:::
 
 ::: tip Reusing your MQTT exporter broker
 If you already have an MQTT exporter configured, the ESP32 proxy can use the same broker. Just make sure `device_id` and `client_id` don't collide.
@@ -168,24 +176,61 @@ If you already have an MQTT exporter configured, the ESP32 proxy can use the sam
 The default `mqtt://` URL transmits data in plaintext, including body weight and composition data. On untrusted networks, use `mqtts://` with a TLS-enabled broker.
 :::
 
+## Docker Deployment
+
+When using the ESP32 proxy, BLE Scale Sync does not need local Bluetooth at all. This means the Docker container requires no BlueZ, D-Bus mounts, or `NET_ADMIN` capability.
+
+A dedicated compose file is included:
+
+```yaml
+# docker-compose.mqtt-proxy.yml
+services:
+  ble-scale-sync:
+    image: ghcr.io/kristianp26/ble-scale-sync:latest
+    container_name: ble-scale-sync
+    volumes:
+      - ./config.yaml:/app/config.yaml
+      - garmin-tokens:/app/garmin-tokens
+    environment:
+      - CONTINUOUS_MODE=true
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '3'
+
+volumes:
+  garmin-tokens:
+```
+
+```bash
+docker compose -f docker-compose.mqtt-proxy.yml up -d
+```
+
+Compare this to the standard [Docker deployment](/guide/getting-started#docker) which needs `network_mode: host`, `/var/run/dbus` bind mount, and `NET_ADMIN`. The mqtt-proxy approach avoids all of that because BLE communication happens on the ESP32, not the host.
+
 ## Firmware Files
 
-```
-firmware/
-  config.json.example       # WiFi + MQTT config template
-  flash.sh                  # One-command flash script
-  boot.py                   # Stub - WiFi managed by mqtt_as
-  main.py                   # MQTT dispatch + autonomous scan loop
-  ble_bridge.py             # BLE scanning via aioble
-  beep.py                   # I2S buzzer driver (boards with HAS_BEEP)
-  board.py                  # Board auto-detection dispatch
-  board_atom_echo.py        # Atom Echo config (no PSRAM, I2S beep)
-  board_esp32_s3.py         # Generic ESP32-S3 config
-  board_guition_4848.py     # Guition 4848 config (LVGL display)
-  panel_init_guition_4848.py # ST7701S panel init sequence data
-  ui.py                     # LVGL display UI (boards with HAS_DISPLAY)
-  requirements.txt          # MicroPython library dependencies
-```
+::: details Firmware directory layout
+
+| File                        | Purpose                                            |
+| --------------------------- | -------------------------------------------------- |
+| `config.json.example`       | WiFi + MQTT config template                        |
+| `flash.sh`                  | One-command flash script                           |
+| `boot.py`                   | Stub (WiFi managed by mqtt_as)                     |
+| `main.py`                   | MQTT dispatch + autonomous scan loop               |
+| `ble_bridge.py`             | BLE scanning via aioble                            |
+| `beep.py`                   | I2S buzzer driver (boards with `HAS_BEEP`)         |
+| `board.py`                  | Board auto-detection dispatch                      |
+| `board_atom_echo.py`        | Atom Echo config (no PSRAM, I2S beep)              |
+| `board_esp32_s3.py`         | Generic ESP32-S3 config                            |
+| `board_guition_4848.py`     | Guition 4848 config (LVGL display)                 |
+| `panel_init_guition_4848.py`| ST7701S panel init sequence data                   |
+| `ui.py`                     | LVGL display UI (boards with `HAS_DISPLAY`)        |
+| `requirements.txt`          | MicroPython library dependencies                   |
+
+:::
 
 ### What the firmware does
 
@@ -195,27 +240,31 @@ firmware/
 - **Display UI** (4848 board): shows WiFi/MQTT/BLE status, scan activity, user match results, and export outcomes
 - **Config sync**: receives scale MAC list and user info from the server for local feedback
 
+::: details Scan modes diagram
+See [`docs/images/scan-modes.drawio`](https://github.com/KristianP26/ble-scale-sync/blob/main/docs/images/scan-modes.drawio) for a visual overview of how broadcast and GATT scan modes interact with the ESP32 proxy.
+:::
+
 ### MQTT Topics
 
 All topics are prefixed with `{topic_prefix}/{device_id}/` (default: `ble-proxy/esp32-ble-proxy/`).
 
-| Topic                  | Direction       | Payload                                                   |
-| ---------------------- | --------------- | --------------------------------------------------------- |
-| `status`               | ESP32 -> Server | `"online"` / `"offline"` (retained, LWT)                  |
-| `error`                | ESP32 -> Server | Error message string                                      |
-| `scan/results`         | ESP32 -> Server | JSON array of discovered devices                          |
-| `config`               | Server -> ESP32 | `{"scales": ["AA:BB:..."], "users": [...]}` (retained)    |
-| `beep`                 | Server -> ESP32 | `""` or `{"freq": 1000, "duration": 200, "repeat": 1}`    |
-| `display/reading`      | Server -> ESP32 | `{"slug", "name", "weight", "impedance", "exporters"}`    |
-| `display/result`       | Server -> ESP32 | `{"slug", "name", "weight", "exports": [{"name", "ok"}]}` |
-| `connect`              | Server -> ESP32 | `{"address": "AA:BB:...", "addr_type": 0}`                |
-| `connected`            | ESP32 -> Server | `{"chars": [{"uuid": "...", "properties": [...]}]}`       |
-| `disconnect`           | Server -> ESP32 | (any)                                                     |
-| `disconnected`         | ESP32 -> Server | (empty)                                                   |
-| `notify/{uuid}`        | ESP32 -> Server | Raw binary (characteristic notification)                  |
-| `write/{uuid}`         | Server -> ESP32 | Raw binary (characteristic write)                         |
-| `read/{uuid}`          | Server -> ESP32 | (empty, triggers read)                                    |
-| `read/{uuid}/response` | ESP32 -> Server | Raw binary (read result)                                  |
+| Topic                  | Direction       | Payload                                                                     |
+| ---------------------- | --------------- | --------------------------------------------------------------------------- |
+| `status`               | ESP32 -> Server | `"online"` / `"offline"` (retained, LWT)                                    |
+| `error`                | ESP32 -> Server | Error message string                                                        |
+| `scan/results`         | ESP32 -> Server | JSON array of discovered devices                                            |
+| `config`               | Server -> ESP32 | JSON with `scales` (MAC array) and `users` (array), retained                |
+| `beep`                 | Server -> ESP32 | Empty string or JSON with `freq`, `duration`, `repeat`                      |
+| `display/reading`      | Server -> ESP32 | JSON with user slug, name, weight, impedance, and exporter list             |
+| `display/result`       | Server -> ESP32 | JSON with user slug, name, weight, and per-exporter success/failure results |
+| `connect`              | Server -> ESP32 | JSON with `address` and `addr_type`                                         |
+| `connected`            | ESP32 -> Server | JSON with discovered `chars` (uuid + properties per characteristic)         |
+| `disconnect`           | Server -> ESP32 | Any payload (triggers disconnect)                                           |
+| `disconnected`         | ESP32 -> Server | Empty payload                                                               |
+| `notify/{uuid}`        | ESP32 -> Server | Raw binary (characteristic notification)                                    |
+| `write/{uuid}`         | Server -> ESP32 | Raw binary (characteristic write)                                           |
+| `read/{uuid}`          | Server -> ESP32 | Empty payload (triggers read)                                               |
+| `read/{uuid}/response` | ESP32 -> Server | Raw binary (read result)                                                    |
 
 ## Troubleshooting
 
