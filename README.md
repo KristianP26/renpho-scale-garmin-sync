@@ -60,16 +60,10 @@ Requires Node.js v20+ and a BLE adapter. See the **[full install guide](https://
 - **[Multi-user](https://blescalesync.dev/multi-user)** — automatic weight-based identification with per-user exporters
 - **[Interactive setup wizard](https://blescalesync.dev/guide/configuration)** — scale discovery, exporter config, connectivity tests
 - **[BLE diagnostic tool](https://blescalesync.dev/troubleshooting)** — `npm run diagnose` for detailed BLE troubleshooting
-- **[ESP32 BLE proxy](https://blescalesync.dev/guide/esp32-proxy)** — use a remote ESP32 as a BLE radio over MQTT, with optional display for status feedback
+- **[ESP32 BLE proxy](https://blescalesync.dev/guide/esp32-proxy)** — use a remote ESP32 as a BLE radio over MQTT, with simplified Docker deployment and optional display
 - **Broadcast mode** — supports non-connectable scales that only advertise weight via BLE advertisements
 - **Cross-platform** — Linux (Docker + native), macOS, Windows
 - **Private** — your data stays on your device, no vendor cloud
-
-<p align="center">
-  <img src="docs/images/esp32-display.png" alt="ESP32 display showing BLE Scale Sync status" width="240">
-  <br>
-  <em>Optional ESP32-S3-4848 display board showing scan status and connection indicators</em>
-</p>
 
 ## Credits
 
