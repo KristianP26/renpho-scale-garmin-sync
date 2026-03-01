@@ -1,6 +1,10 @@
 ---
 title: Configuration
 description: Complete config.yaml reference for BLE Scale Sync.
+head:
+  - - meta
+    - name: keywords
+      content: ble scale sync config, config.yaml smart scale, setup wizard, scale configuration, garmin exporter config, mqtt exporter config
 ---
 
 # Configuration

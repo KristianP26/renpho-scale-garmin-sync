@@ -1,6 +1,10 @@
 ---
 title: Multi-User Support
 description: Automatic weight-based user identification, drift detection, and per-user exporter configuration.
+head:
+  - - meta
+    - name: keywords
+      content: multi user smart scale, family scale sync, automatic user detection, weight matching, shared scale garmin, per user garmin strava
 ---
 
 # Multi-User Support

@@ -1,6 +1,10 @@
 ---
 title: Troubleshooting
 description: Common issues, debug tips, and solutions for BLE Scale Sync.
+head:
+  - - meta
+    - name: keywords
+      content: bluetooth scale not found, ble troubleshooting linux, bluez docker, raspberry pi bluetooth issues, scale not connecting, dbus bluetooth error, noble ble error
 ---
 
 # Troubleshooting

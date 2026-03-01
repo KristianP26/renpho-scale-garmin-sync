@@ -1,6 +1,10 @@
 ---
 title: Body Composition
 description: Body composition metrics, BIA formulas, Deurenberg fallback, and athlete mode adjustments.
+head:
+  - - meta
+    - name: keywords
+      content: body fat percentage, muscle mass calculation, bioelectrical impedance analysis, bia formula, bmi calculator, visceral fat, bone mass, body water percentage, smart scale accuracy, body composition metrics
 ---
 
 # Body Composition

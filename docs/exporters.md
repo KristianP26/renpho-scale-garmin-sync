@@ -1,6 +1,10 @@
 ---
 title: Exporters
 description: Configure Garmin Connect, Strava, MQTT, Webhook, InfluxDB, Ntfy, and File export targets.
+head:
+  - - meta
+    - name: keywords
+      content: garmin connect scale sync, strava weight sync, mqtt home assistant scale, influxdb body weight, smart scale webhook, ntfy notifications, scale data export csv, garmin body composition upload
 ---
 
 # Exporters
