@@ -1,6 +1,6 @@
 {
   "name": "ble-scale-sync",
-  "version": "1.6.0",
+  "version": "1.6.1",
   "description": "Universal BLE Smart Scale bridge. Captures body composition from Renpho, Xiaomi & 20+ others, syncs to Garmin Connect, Strava, MQTT (Home Assistant), InfluxDB, Webhooks, Ntfy & local files. Headless CLI for Raspberry Pi, Linux, macOS & Windows.",
   "type": "module",
   "main": "src/index.ts",
@@ -34,7 +34,7 @@
   "author": "Kristián Partl",
   "license": "GPL-3.0",
   "engines": {
-    "node": ">=20"
+    "node": ">=20.19.0"
   },
   "dependencies": {
     "@abandonware/noble": "^1.9.2-26",

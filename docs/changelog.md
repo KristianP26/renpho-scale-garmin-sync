@@ -7,7 +7,20 @@ description: Version history for BLE Scale Sync.
 
 All notable changes to this project are documented here. Format based on [Keep a Changelog](https://keepachangelog.com/).
 
-## v1.6.0 <Badge type="tip" text="latest" /> {#v1-6-0}
+## v1.6.1 <Badge type="tip" text="latest" /> {#v1-6-1}
+
+_2026-03-01_
+
+### Fixed
+- **BlueZ stale discovery recovery** after Docker container restart. Adds kernel-level adapter reset via `btmgmt` as Tier 4 fallback when D-Bus recovery fails, plus proactive adapter reset in Docker entrypoint ([#39](https://github.com/KristianP26/ble-scale-sync/issues/39), [#43](https://github.com/KristianP26/ble-scale-sync/pull/43))
+
+### Changed
+- **CI**: Docker cleanup workflow removes PR images and untagged versions from GHCR ([#58](https://github.com/KristianP26/ble-scale-sync/pull/58))
+- **Docs**: Contributors section added to README
+- **Node.js**: minimum version bumped to 20.19.0 (required by eslint 10.0.2)
+- **Deps**: @stoprocent/noble 2.3.16, eslint 10.0.2, typescript-eslint 8.56.1, @types/node 25.3.3, @inquirer/prompts 8.3.0
+
+## v1.6.0 {#v1-6-0}
 
 _2026-02-28_
 
