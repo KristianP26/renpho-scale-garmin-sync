@@ -13,6 +13,14 @@ export default defineConfig({
   head: [
     ['link', { rel: 'icon', href: '/favicon.svg', type: 'image/svg+xml' }],
     ['meta', { name: 'theme-color', content: '#3b82f6' }],
+    [
+      'meta',
+      {
+        name: 'keywords',
+        content:
+          'ble scale, smart scale, body composition, garmin connect, strava, bluetooth scale, weight sync, raspberry pi, home assistant, mqtt, self-hosted, docker, body fat, impedance',
+      },
+    ],
     ['meta', { property: 'og:type', content: 'website' }],
     ['meta', { property: 'og:title', content: 'BLE Scale Sync' }],
     [
@@ -20,7 +28,7 @@ export default defineConfig({
       {
         property: 'og:description',
         content:
-          'Automatic body composition sync from BLE smart scales to Garmin Connect, Home Assistant, InfluxDB and more.',
+          'Automatic body composition sync from BLE smart scales to Garmin Connect, Strava, Home Assistant, InfluxDB and more.',
       },
     ],
     ['meta', { property: 'og:url', content: 'https://blescalesync.dev' }],

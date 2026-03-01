@@ -1,5 +1,9 @@
 ---
 layout: home
+head:
+  - - meta
+    - name: keywords
+      content: ble scale sync, smart scale garmin connect, bluetooth scale raspberry pi, body composition sync, renpho garmin, xiaomi scale garmin, strava weight sync, mqtt smart scale, home assistant scale, self hosted weight tracker, esp32 ble proxy, docker smart scale
 
 hero:
   name: BLE Scale Sync

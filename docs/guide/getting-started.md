@@ -1,6 +1,10 @@
 ---
 title: Getting Started
 description: Install and run BLE Scale Sync with Docker or Node.js.
+head:
+  - - meta
+    - name: keywords
+      content: ble scale setup, smart scale raspberry pi, docker bluetooth scale, install ble scale sync, garmin scale sync, esp32 ble proxy setup
 ---
 
 # Getting Started

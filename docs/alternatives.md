@@ -1,6 +1,10 @@
 ---
 title: Alternatives
 description: How BLE Scale Sync compares to openScale, openScale-sync, manufacturer apps, and more.
+head:
+  - - meta
+    - name: keywords
+      content: openscale alternative, smart scale garmin sync, scale app comparison, openscale sync garmin, renpho garmin connect, xiaomi garmin connect, self hosted scale app
 ---
 
 # Alternatives

@@ -1,6 +1,10 @@
 ---
 title: Supported Scales
 description: All 23 BLE smart scale brands supported by BLE Scale Sync.
+head:
+  - - meta
+    - name: keywords
+      content: xiaomi mi scale, renpho scale bluetooth, eufy smart scale, yunmai scale, beurer bf scale, sanitas scale, medisana bs scale, silvercrest scale, 1byone scale, etekcity scale, inevifit scale, arboleaf scale, lepulse scale, fitdays scale, senssun scale, supported ble scales
 ---
 
 # Supported Scales

@@ -1,6 +1,10 @@
 ---
 title: ESP32 BLE Proxy
 description: Use an ESP32 as a remote BLE-to-MQTT bridge for headless or Docker deployments.
+head:
+  - - meta
+    - name: keywords
+      content: esp32 bluetooth proxy, esp32 ble mqtt bridge, remote bluetooth raspberry pi, esp32 micropython ble, esp32 smart scale, mqtt ble gateway, esp32 weight scale, wireless ble relay
 ---
 
 # ESP32 BLE Proxy
